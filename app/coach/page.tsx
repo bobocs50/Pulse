@@ -15,7 +15,7 @@ const FLARE_CLEAR = 0.10; // back to green below
 import { createDetectState, detectPeak, currentBpm, TRACE_LEN } from "@/lib/coach/detect";
 import { createSessionState, transition } from "@/lib/coach/state";
 import type { Phase } from "@/lib/coach/state";
-import { ensureRunning, loadBuffer, startMetronome, stopMetronome, setOnBeat, getAudioContext, preloadAll, playNow, playCorrection } from "@/lib/audio/engine";
+import { ensureRunning, loadBuffer, startMetronome, stopMetronome, setOnBeat, getAudioContext, preloadAll, playNow, playCorrection, getFrequencyData } from "@/lib/audio/engine";
 import { COUNT_CUES } from "@/lib/audio/cues";
 
 const INSTRUCTIONS: Record<Phase, { step: string; title: string; hint: string }> = {
@@ -53,10 +53,13 @@ export default function CoachPage() {
   const { videoRef, status, facing, flip } = useCamera();
   const { workerRef, landmarksRef, handsRef, readyRef, pendingRef } = usePose();
 
-  const canvasRef  = useRef<HTMLCanvasElement>(null);
-  const traceRef   = useRef<HTMLCanvasElement>(null); // y-trace plot
-  const offscreen  = useRef<OffscreenCanvas | null>(null);
-  const rafRef     = useRef<number>(0);
+  const canvasRef    = useRef<HTMLCanvasElement>(null);
+  const traceRef     = useRef<HTMLCanvasElement>(null); // y-trace plot
+  const offscreen    = useRef<OffscreenCanvas | null>(null);
+  const rafRef       = useRef<number>(0);
+  // Audio-reactive blob refs — driven by rAF loop, never by React state
+  const blobRef      = useRef<HTMLButtonElement>(null);
+  const barContainer = useRef<HTMLDivElement>(null);
 
   const [feedback, setFeedback] = useState<CameraFeedback>(null);
   const [score, setScore]       = useState<number | null>(null);
@@ -87,6 +90,51 @@ export default function CoachPage() {
     const unlock = () => { ensureRunning(); };
     window.addEventListener("pointerdown", unlock, { once: true });
     return () => window.removeEventListener("pointerdown", unlock);
+  }, []);
+
+  // Audio-reactive blob: reads real AnalyserNode output, drives bar heights and
+  // blob animation directly via DOM refs — zero React re-renders in this path.
+  useEffect(() => {
+    // Frequency bins (of 32 total at fftSize=64) mapped to 5 bars:
+    // roughly sub-bass, bass, mid, presence, air — covers voice + metronome click
+    const BIN_GROUPS = [[1,2],[3,5],[6,9],[10,14],[15,20]] as const;
+    const smoothed = [0, 0, 0, 0, 0];
+    let rafId: number;
+
+    function frame() {
+      rafId = requestAnimationFrame(frame);
+      const data = getFrequencyData();
+      const bars = barContainer.current?.children;
+      let totalLevel = 0;
+
+      for (let i = 0; i < 5; i++) {
+        const [lo, hi] = BIN_GROUPS[i];
+        let sum = 0;
+        const count = hi - lo + 1;
+        for (let b = lo; b <= hi; b++) sum += (data[b] ?? 0);
+        const raw = sum / count / 255; // 0–1
+        smoothed[i] = smoothed[i] * 0.72 + raw * 0.28; // lerp
+        totalLevel += smoothed[i];
+        if (bars?.[i]) {
+          (bars[i] as HTMLElement).style.height = `${3 + smoothed[i] * 23}px`;
+        }
+      }
+
+      const avg = totalLevel / 5;
+      const blob = blobRef.current;
+      if (blob) {
+        const speaking = avg > 0.025;
+        blob.style.animation = speaking
+          ? "blobTalk 0.52s ease-in-out infinite"
+          : "blobRest 3s ease-in-out infinite";
+        blob.style.boxShadow = speaking
+          ? `0 0 ${20 + avg * 48}px rgba(232,99,74,${(0.4 + avg * 0.5).toFixed(2)}), 0 0 10px rgba(200,70,40,0.35)`
+          : "0 4px 16px rgba(200,70,40,0.22)";
+      }
+    }
+
+    rafId = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(rafId);
   }, []);
 
   async function toggleMetronome() {
@@ -407,17 +455,12 @@ export default function CoachPage() {
           80%  { border-radius:44% 56% 46% 54% / 58% 42% 60% 40%; transform:scale(1.09); }
           100% { border-radius:50%;                                transform:scale(1);    }
         }
-        @keyframes wbar1 { 0%,100%{height:5px}  25%{height:20px} 75%{height:10px} }
-        @keyframes wbar2 { 0%,100%{height:18px} 40%{height:6px}  70%{height:22px} }
-        @keyframes wbar3 { 0%,100%{height:24px} 50%{height:5px}             }
-        @keyframes wbar4 { 0%,100%{height:12px} 35%{height:22px} 65%{height:6px}  }
-        @keyframes wbar5 { 0%,100%{height:6px}  20%{height:18px} 60%{height:8px}  }
-        .wbar { width:4px; border-radius:3px; background:rgba(255,255,255,0.88); }
-        .wbar-1 { animation: wbar1 0.9s ease-in-out infinite; }
-        .wbar-2 { animation: wbar2 0.75s ease-in-out infinite 0.12s; }
-        .wbar-3 { animation: wbar3 0.82s ease-in-out infinite 0.06s; }
-        .wbar-4 { animation: wbar4 0.68s ease-in-out infinite 0.18s; }
-        .wbar-5 { animation: wbar5 0.95s ease-in-out infinite 0.09s; }
+        .wbar {
+          border-radius: 3px;
+          background: rgba(255,255,255,0.90);
+          transition: height 80ms ease-out;
+          will-change: height;
+        }
         .pb-safe { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
       `}</style>
 
@@ -527,31 +570,32 @@ export default function CoachPage() {
           })()}
         </div>
 
-        {/* Blob strip — just enough space, camera gets everything else */}
-        <div className="flex justify-center items-center pt-4 pb-safe bg-[#F0EEE9]">
+        {/* Blob strip */}
+        <div className="flex justify-center items-center pt-5 pb-safe bg-[#F0EEE9]">
           <div
-            className="rounded-full"
             style={{ transition: "transform 150ms cubic-bezier(0.23,1,0.32,1)" }}
             onPointerDown={e => (e.currentTarget.style.transform = "scale(0.96)")}
             onPointerUp={e => (e.currentTarget.style.transform = "")}
             onPointerLeave={e => (e.currentTarget.style.transform = "")}
           >
             <button
+              ref={blobRef}
               onClick={toggleMetronome}
-              className="w-[4.5rem] h-[4.5rem] rounded-full focus:outline-none flex items-center justify-center gap-[4px]"
+              className="w-[4.5rem] h-[4.5rem] rounded-full focus:outline-none flex items-center justify-center gap-[5px]"
               style={{
                 background: "radial-gradient(ellipse at 38% 30%, #F9AE72 0%, #E86B47 32%, #C44728 62%, #8C2410 100%)",
-                animation: metroOn ? "blobTalk 0.545s ease-in-out infinite" : "blobRest 3s ease-in-out infinite",
-                boxShadow: metroOn
-                  ? "0 0 32px rgba(232,99,74,0.55), 0 0 10px rgba(200,70,40,0.35)"
-                  : "0 4px 16px rgba(200,70,40,0.22)",
+                animation: "blobRest 3s ease-in-out infinite",
+                boxShadow: "0 4px 16px rgba(200,70,40,0.22)",
               }}
             >
-              <span className="wbar wbar-1" style={{ height: 4 }} />
-              <span className="wbar wbar-2" style={{ height: 15 }} />
-              <span className="wbar wbar-3" style={{ height: 20 }} />
-              <span className="wbar wbar-4" style={{ height: 10 }} />
-              <span className="wbar wbar-5" style={{ height: 5 }} />
+              {/* Heights start flat (3px). The audio rAF loop drives them via barContainer. */}
+              <div ref={barContainer} className="flex items-center gap-[5px]">
+                <span className="wbar" style={{ width: 3, height: 3 }} />
+                <span className="wbar" style={{ width: 4, height: 3 }} />
+                <span className="wbar" style={{ width: 5, height: 3 }} />
+                <span className="wbar" style={{ width: 4, height: 3 }} />
+                <span className="wbar" style={{ width: 3, height: 3 }} />
+              </div>
             </button>
           </div>
         </div>

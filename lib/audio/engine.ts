@@ -7,6 +7,7 @@
 import { CUE } from "./cues";
 
 let ctx: AudioContext | null = null;
+let analyser: AnalyserNode | null = null;
 const buffers = new Map<string, AudioBuffer>();
 
 export function getAudioContext(): AudioContext {
@@ -20,6 +21,27 @@ export function getAudioContext(): AudioContext {
     ctx = new AudioContext();
   }
   return ctx;
+}
+
+// All audio routes through this analyser so getFrequencyData() reflects real output.
+function getAnalyser(): AnalyserNode {
+  const c = getAudioContext();
+  if (!analyser) {
+    analyser = c.createAnalyser();
+    analyser.fftSize = 64;               // 32 bins — enough for 5 bar groups
+    analyser.smoothingTimeConstant = 0.8; // built-in temporal smoothing
+    analyser.connect(c.destination);
+  }
+  return analyser;
+}
+
+// Returns frequency magnitude data (0-255 per bin). Returns empty array before
+// AudioContext exists (no user gesture yet — bars stay flat until first tap).
+export function getFrequencyData(): Uint8Array {
+  if (!ctx || !analyser) return new Uint8Array(0);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(data);
+  return data;
 }
 
 // Call on every user gesture that starts a new audio phase (iOS requirement)
@@ -62,7 +84,7 @@ export function playNow(name: string): void {
   try { voiceSrc?.stop(); } catch {}
   const src = ctx.createBufferSource();
   src.buffer = buf;
-  src.connect(ctx.destination);
+  src.connect(getAnalyser()); // routes through analyser → destination
   src.onended = () => { if (voiceSrc === src) voiceSrc = null; };
   src.start();
   voiceSrc = src;
@@ -103,7 +125,7 @@ function scheduleTick() {
     if (buf) {
       const src = ctx.createBufferSource();
       src.buffer = buf;
-      src.connect(ctx.destination);
+      src.connect(getAnalyser()); // routes through analyser → destination
       src.start(t);
     } else {
       // click.mp3 not rendered yet — synthesized tick keeps the metronome real
@@ -113,7 +135,7 @@ function scheduleTick() {
       gain.gain.setValueAtTime(0.5, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(getAnalyser()); // routes through analyser → destination
       osc.start(t);
       osc.stop(t + 0.06);
     }
