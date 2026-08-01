@@ -57,17 +57,17 @@ export default function CoachPage() {
   const [count, setCount]       = useState(0);
   const [bpm, setBpm]           = useState<number | null>(null);
   const [phase, setPhase]       = useState<Phase>("IDLE");
-  const [tab, setTab]           = useState<"tracking" | "coach" | "manual">("tracking");
   const [metroOn, setMetroOn]   = useState(false);
   const [beatCount, setBeatCount] = useState(0); // 1..30, manual metronome
+  const [rounds, setRounds]     = useState(0);
+  const [elapsed, setElapsed]   = useState(0); // seconds since first compression
+  const sessionStartRef         = useRef<number | null>(null); // ms timestamp of first peak
 
-  const [audioState, setAudioState] = useState("idle");
 
   // Manual metronome: beat callback drives the count display; cleanup stops audio
   useEffect(() => {
     setOnBeat(b => {
       setBeatCount((b % 30) + 1);
-      setAudioState(getAudioContext().state);
     });
     return () => {
       setOnBeat(null);
@@ -90,7 +90,6 @@ export default function CoachPage() {
       return;
     }
     await ensureRunning(); // iOS: resume on every gesture path
-    setAudioState(getAudioContext().state);
     loadBuffer("click").catch(() => {}); // real click.mp3 if present, synth otherwise
     startMetronome();
     setMetroOn(true);
@@ -181,10 +180,12 @@ export default function CoachPage() {
 
     // React state only on actual change (~2Hz on peaks, rare on phase flips)
     if (isPeak) {
+      if (sessionStartRef.current === null) sessionStartRef.current = now;
       navigator.vibrate?.(40);
       playNow(COUNT_CUES[(next.compressCount - 1) % 30]); // spoken count on the peak
       setCount(next.compressCount);
       setBpm(currentBpm(detectRef.current));
+      if (next.cycleCount !== prev.cycleCount) setRounds(next.cycleCount);
     }
     if (next.phase !== prev.phase) setPhase(next.phase);
   }
@@ -341,6 +342,10 @@ export default function CoachPage() {
     if (now - lastStateUpdate.current < 100) return; // ~10fps
     lastStateUpdate.current = now;
 
+    if (sessionStartRef.current !== null) {
+      setElapsed(Math.floor((now - sessionStartRef.current) / 1000));
+    }
+
     const lm = landmarksRef.current;
     const { left, right } = bentRef.current;
     // Spoken correction, self-throttled by playCorrection's minimum gap
@@ -360,47 +365,39 @@ export default function CoachPage() {
   }
 
   return (
-    <div className="h-full w-full bg-zinc-50 text-zinc-900 flex flex-col overflow-hidden">
-      <style>{`@keyframes beatPulse { 0% { transform: scale(1.08); } 100% { transform: scale(1); } }`}</style>
+    <div className="h-full w-full bg-[#F0EEE9] text-zinc-900 flex flex-col overflow-hidden">
+      <style>{`
+        @keyframes blobRest {
+          0%,100% { border-radius:50%; transform:scale(1); }
+          50%      { border-radius:55% 45% 52% 48% / 48% 55% 45% 52%; transform:scale(1.04); }
+        }
+        @keyframes blobTalk {
+          0%   { border-radius:50%;                                transform:scale(1);    }
+          20%  { border-radius:58% 42% 62% 38% / 52% 60% 40% 48%; transform:scale(1.11); }
+          40%  { border-radius:38% 62% 44% 56% / 60% 40% 58% 42%; transform:scale(1.07); }
+          60%  { border-radius:62% 38% 54% 46% / 42% 58% 42% 58%; transform:scale(1.13); }
+          80%  { border-radius:44% 56% 46% 54% / 58% 42% 60% 40%; transform:scale(1.09); }
+          100% { border-radius:50%;                                transform:scale(1);    }
+        }
+        @keyframes wbar1 { 0%,100%{height:5px}  25%{height:20px} 75%{height:10px} }
+        @keyframes wbar2 { 0%,100%{height:18px} 40%{height:6px}  70%{height:22px} }
+        @keyframes wbar3 { 0%,100%{height:24px} 50%{height:5px}             }
+        @keyframes wbar4 { 0%,100%{height:12px} 35%{height:22px} 65%{height:6px}  }
+        @keyframes wbar5 { 0%,100%{height:6px}  20%{height:18px} 60%{height:8px}  }
+        .wbar { width:4px; border-radius:3px; background:rgba(255,255,255,0.88); }
+        .wbar-1 { animation: wbar1 0.9s ease-in-out infinite; }
+        .wbar-2 { animation: wbar2 0.75s ease-in-out infinite 0.12s; }
+        .wbar-3 { animation: wbar3 0.82s ease-in-out infinite 0.06s; }
+        .wbar-4 { animation: wbar4 0.68s ease-in-out infinite 0.18s; }
+        .wbar-5 { animation: wbar5 0.95s ease-in-out infinite 0.09s; }
+        .pb-safe { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+      `}</style>
 
-      {/* Tabs */}
-      <div className="pt-12 safe-top px-4 pb-3 bg-white border-b border-zinc-200">
-        <div className="flex bg-zinc-100 rounded-full p-1 gap-1">
-          {(["tracking", "coach", "manual"] as const).map(t => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`flex-1 py-2 rounded-full text-sm font-semibold capitalize transition-colors ${
-                tab === t ? "bg-sky-200 text-sky-900" : "text-zinc-500"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* ---- Main panel ---- */}
+      <div className="flex-1 flex flex-col min-h-0">
 
-      {/* ---- Tracking panel (stays mounted — camera keeps its stream).
-           "coach" = tracking + metronome combined ---- */}
-      <div className={`flex-1 flex-col min-h-0 ${tab === "tracking" || tab === "coach" ? "flex" : "hidden"}`}>
-
-        {/* Instruction banner — phase-driven */}
-        <div className={`mx-2 mt-2 rounded-2xl text-center px-4 py-3 ${
-          phase === "STALLED" ? "bg-rose-100" : "bg-sky-100"
-        }`}>
-          <p className={`text-[11px] font-bold tracking-widest ${phase === "STALLED" ? "text-rose-500" : "text-sky-500"}`}>
-            {INSTRUCTIONS[phase].step}
-          </p>
-          <p className={`font-bold text-xl leading-tight ${phase === "STALLED" ? "text-rose-900" : "text-sky-900"}`}>
-            {INSTRUCTIONS[phase].title}
-          </p>
-          <p className={`text-sm mt-0.5 ${phase === "STALLED" ? "text-rose-700" : "text-sky-700"}`}>
-            {INSTRUCTIONS[phase].hint}
-          </p>
-        </div>
-
-        {/* Camera card — object-cover on BOTH fills the card and keeps overlay aligned */}
-        <div className="relative flex-1 m-2 rounded-2xl overflow-hidden bg-zinc-900 shadow-sm">
+        {/* Camera — fills all available height */}
+        <div className="relative flex-1 overflow-hidden bg-zinc-900">
           <video
             ref={videoRef}
             className="absolute inset-0 w-full h-full object-cover"
@@ -414,30 +411,26 @@ export default function CoachPage() {
             style={facing === "user" ? { transform: "scaleX(-1)" } : undefined}
           />
 
-          {/* Flip camera */}
+          {/* Flip — top right */}
           <button
             onClick={flip}
-            className="absolute top-3 right-3 z-10 bg-white/80 backdrop-blur-sm rounded-full px-3 py-2 text-zinc-700 text-xs font-semibold"
+            className="absolute top-3 right-3 z-10 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5 text-white/90 text-xs font-semibold"
+            style={{ transition: "transform 150ms cubic-bezier(0.23,1,0.32,1)" }}
+            onPointerDown={e => (e.currentTarget.style.transform = "scale(0.94)")}
+            onPointerUp={e => (e.currentTarget.style.transform = "")}
+            onPointerLeave={e => (e.currentTarget.style.transform = "")}
           >
             Flip
           </button>
 
-          {/* Camera feedback toast — top, count owns the bottom */}
+          {/* Feedback toast — top center, inset from flip button */}
           {feedback && (
-            <div className="absolute top-3 inset-x-3 z-10 flex justify-center pointer-events-none">
-              <div className="bg-amber-200/95 backdrop-blur-sm rounded-xl px-4 py-2">
-                <p className="text-amber-950 font-semibold text-sm">{feedback.message}</p>
+            <div className="absolute top-3 left-3 right-16 z-10 flex justify-center pointer-events-none">
+              <div className="bg-amber-200/95 backdrop-blur-sm rounded-full px-4 py-2">
+                <p className="text-amber-950 font-semibold text-xs">{feedback.message}</p>
               </div>
             </div>
           )}
-
-          {/* Count — huge, bottom, over a fading gradient so video stays visible */}
-          <div className="absolute bottom-0 inset-x-0 z-10 pointer-events-none bg-gradient-to-t from-black/70 via-black/25 to-transparent pt-16 pb-2 flex items-end justify-center">
-            <span className="text-white font-black text-[7rem] leading-none tabular-nums drop-shadow-lg">
-              {count}
-            </span>
-            <span className="text-white/70 font-bold text-3xl mb-3 ml-2">/ 30</span>
-          </div>
 
           {status === "loading" && (
             <div className="absolute inset-0 flex items-center justify-center bg-zinc-900 z-20">
@@ -449,78 +442,93 @@ export default function CoachPage() {
               <p className="text-zinc-300 text-lg">Camera permission denied. Allow camera access and reload.</p>
             </div>
           )}
+
+          {/* Stats HUD — frosted pill overlaid on bottom of camera, all edges rounded */}
+          {(() => {
+            const PHASE_DOT: Record<Phase, string> = {
+              IDLE: "bg-zinc-400", SETUP: "bg-zinc-400",
+              COMPRESS: "bg-emerald-400", STALLED: "bg-amber-400",
+              BREATH_PROMPT: "bg-sky-400", BREATH_WINDOW: "bg-sky-400", CHECK_RISE: "bg-sky-400",
+            };
+            const PHASE_LABEL: Record<Phase, string> = {
+              IDLE: "READY", SETUP: "READY",
+              COMPRESS: "PUSH", STALLED: "DON'T STOP",
+              BREATH_PROMPT: "BREATHE", BREATH_WINDOW: "BREATHE", CHECK_RISE: "WATCH",
+            };
+            const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+            const ss = String(elapsed % 60).padStart(2, "0");
+            return (
+              <div
+                className="absolute bottom-4 inset-x-4 z-10 rounded-2xl flex items-center px-4 py-3 gap-3"
+                style={{
+                  background: "rgba(255,255,255,0.82)",
+                  backdropFilter: "blur(16px)",
+                  WebkitBackdropFilter: "blur(16px)",
+                  boxShadow: "0 2px 20px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)",
+                }}
+              >
+                {/* Phase indicator */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <div className={`w-[7px] h-[7px] rounded-full ${PHASE_DOT[phase]}`} />
+                  <span className="text-[9px] font-bold tracking-widest text-zinc-500 uppercase">{PHASE_LABEL[phase]}</span>
+                </div>
+
+                {/* Count — dominant */}
+                <div className="flex items-baseline gap-[3px]">
+                  <span className="text-[2.6rem] font-black tabular-nums leading-none tracking-tight text-zinc-900">{count}</span>
+                  <span className="text-sm font-bold text-zinc-300 leading-none">/30</span>
+                </div>
+
+                <div className="flex-1" />
+
+                {/* Time */}
+                <div className="flex flex-col items-center gap-[3px]">
+                  <span className="text-[8px] font-bold tracking-widest text-zinc-400 uppercase leading-none">TIME</span>
+                  <span className="text-[1.05rem] font-bold tabular-nums text-zinc-700 leading-none">{`${mm}:${ss}`}</span>
+                </div>
+
+                <div className="w-px h-6 bg-zinc-200 shrink-0" />
+
+                {/* Rounds */}
+                <div className="flex flex-col items-center gap-[3px]">
+                  <span className="text-[8px] font-bold tracking-widest text-zinc-400 uppercase leading-none">ROUNDS</span>
+                  <span className="text-[1.05rem] font-bold tabular-nums text-zinc-700 leading-none">{rounds}</span>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
-        {/* Chip row */}
-        <div className="flex justify-center gap-2 px-2 pb-1 text-sm">
-          <span className="bg-violet-100 text-violet-900 rounded-full px-4 py-1">
-            score <b className="tabular-nums" style={{
-              color: score === null ? "#a1a1aa" : score >= 80 ? "#059669" : score >= 50 ? "#d97706" : "#e11d48"
-            }}>{score ?? "—"}</b>
-          </span>
-          <span className="bg-emerald-100 text-emerald-900 rounded-full px-4 py-1">
-            bpm <b className="tabular-nums">{bpm ?? "—"}</b>
-          </span>
-        </div>
-
-        {/* Coach mode: compact metronome controls under the chips */}
-        {tab === "coach" && (
-          <div className="flex items-center justify-center gap-3 px-2 pt-1 pb-1">
-            <div
-              className="w-9 h-9 rounded-full bg-rose-200 flex items-center justify-center"
-              style={metroOn ? { animation: "beatPulse 0.545s ease-out infinite" } : undefined}
-            >
-              <span className="text-rose-900 text-xs font-black tabular-nums">
-                {metroOn ? beatCount : "–"}
-              </span>
-            </div>
+        {/* Blob strip — just enough space, camera gets everything else */}
+        <div className="flex justify-center items-center pt-4 pb-safe bg-[#F0EEE9]">
+          <div
+            className="rounded-full"
+            style={{ transition: "transform 150ms cubic-bezier(0.23,1,0.32,1)" }}
+            onPointerDown={e => (e.currentTarget.style.transform = "scale(0.96)")}
+            onPointerUp={e => (e.currentTarget.style.transform = "")}
+            onPointerLeave={e => (e.currentTarget.style.transform = "")}
+          >
             <button
               onClick={toggleMetronome}
-              className={`px-6 py-2 rounded-full text-sm font-bold active:scale-95 transition-transform ${
-                metroOn ? "bg-rose-300 text-rose-950" : "bg-emerald-200 text-emerald-900"
-              }`}
+              className="w-[4.5rem] h-[4.5rem] rounded-full focus:outline-none flex items-center justify-center gap-[4px]"
+              style={{
+                background: "radial-gradient(ellipse at 38% 30%, #F9AE72 0%, #E86B47 32%, #C44728 62%, #8C2410 100%)",
+                animation: metroOn ? "blobTalk 0.545s ease-in-out infinite" : "blobRest 3s ease-in-out infinite",
+                boxShadow: metroOn
+                  ? "0 0 32px rgba(232,99,74,0.55), 0 0 10px rgba(200,70,40,0.35)"
+                  : "0 4px 16px rgba(200,70,40,0.22)",
+              }}
             >
-              {metroOn ? "Stop beat" : "Start beat"}
+              <span className="wbar wbar-1" style={{ height: 4 }} />
+              <span className="wbar wbar-2" style={{ height: 15 }} />
+              <span className="wbar wbar-3" style={{ height: 20 }} />
+              <span className="wbar wbar-4" style={{ height: 10 }} />
+              <span className="wbar wbar-5" style={{ height: 5 }} />
             </button>
           </div>
-        )}
-
-        {/* Y-trace removed from demo UI. drawYTrace no-ops without the canvas;
-            re-add to tune peak detection:
-            <canvas ref={traceRef} width={390} height={80} className="w-full h-20 rounded-lg" /> */}
-        <div className="pb-3 safe-bottom" />
+        </div>
       </div>
 
-      {/* ---- Manual panel: metronome ---- */}
-      <div className={`flex-1 flex-col items-center justify-center gap-8 px-6 ${tab === "manual" ? "flex" : "hidden"}`}>
-        <div className="text-center">
-          <p className="text-2xl font-bold">Metronome</p>
-          <p className="text-zinc-500 text-sm mt-1">110 BPM — push down on every click</p>
-        </div>
-
-        <div
-          className="w-48 h-48 rounded-full bg-rose-200 flex items-center justify-center shadow-inner"
-          style={metroOn ? { animation: "beatPulse 0.545s ease-out infinite" } : undefined}
-        >
-          <span className="text-7xl font-black tabular-nums text-rose-900">
-            {metroOn ? beatCount : "—"}
-          </span>
-        </div>
-
-        <button
-          onClick={toggleMetronome}
-          className={`w-full max-w-xs py-4 rounded-2xl text-xl font-bold active:scale-95 transition-transform ${
-            metroOn ? "bg-rose-300 text-rose-950" : "bg-emerald-200 text-emerald-900"
-          }`}
-        >
-          {metroOn ? "Stop" : "Start metronome"}
-        </button>
-
-        <p className="text-zinc-400 text-xs text-center max-w-xs">
-          30 pushes, then 2 breaths. Counts loop automatically.
-        </p>
-        <p className="text-zinc-300 text-[10px] tabular-nums">audio: {audioState} · beat {beatCount}</p>
-      </div>
     </div>
   );
 }
