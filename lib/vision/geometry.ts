@@ -38,6 +38,17 @@ export function angleBetween(a: Landmark, b: Landmark, c: Landmark): number {
   return Math.acos(clamp(dot / mag, -1, 1)) * (180 / Math.PI);
 }
 
+// 3D variant — uses z so foreshortened limbs (pointing at the camera) don't
+// read as bent the way the 2D projection does.
+export function angleBetween3D(a: Landmark, b: Landmark, c: Landmark): number {
+  const abx = a.x - b.x, aby = a.y - b.y, abz = a.z - b.z;
+  const cbx = c.x - b.x, cby = c.y - b.y, cbz = c.z - b.z;
+  const dot = abx * cbx + aby * cby + abz * cbz;
+  const mag = Math.hypot(abx, aby, abz) * Math.hypot(cbx, cby, cbz);
+  if (mag === 0) return 0;
+  return Math.acos(clamp(dot / mag, -1, 1)) * (180 / Math.PI);
+}
+
 export function averageVisibility(lm: Landmark[], indices: number[]) {
   return indices.reduce((s, i) => s + (lm[i]?.visibility ?? 0), 0) / indices.length;
 }

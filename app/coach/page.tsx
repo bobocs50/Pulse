@@ -4,8 +4,12 @@ import { useCamera } from "@/lib/pose/useCamera";
 import { usePose } from "@/lib/pose/usePose";
 import { getCameraFeedback } from "@/lib/vision/camera-feedback";
 import type { CameraFeedback } from "@/types/vision";
-import { LM, angleBetween } from "@/lib/vision/geometry";
-import { ELBOW_LOCK_DEG } from "@/lib/coach/score";
+import { LM, angleBetween3D } from "@/lib/vision/geometry";
+
+// Elbow color thresholds on the SMOOTHED 3D angle, with hysteresis so the
+// V doesn't flicker at the boundary: red below 150°, back to green above 158°.
+const BEND_TRIP_DEG  = 150;
+const BEND_CLEAR_DEG = 158;
 import { createDetectState, detectPeak, currentBpm, TRACE_LEN } from "@/lib/coach/detect";
 import { createSessionState, transition } from "@/lib/coach/state";
 import type { Phase } from "@/lib/coach/state";
@@ -99,6 +103,7 @@ export default function CoachPage() {
   const detectRef  = useRef(createDetectState());
   const sessionRef = useRef(createSessionState());
   const bentRef    = useRef({ left: false, right: false }); // per-arm bent state (set by drawOverlay)
+  const armAngleRef = useRef({ left: 180, right: 180 });     // smoothed 3D elbow angles
 
   // Throttle ref for React state updates (~10fps)
   const lastStateUpdate = useRef(0);
@@ -241,14 +246,21 @@ export default function CoachPage() {
 
       if (claspX !== null && claspY !== null) {
         ctx.lineCap = "round";
-        // Judge the geometry we draw: angle at the elbow between shoulder and clasp
-        const clasp = { x: claspX, y: claspY, z: 0, visibility: 1 };
         const bentNow = { left: false, right: false };
-        for (const [s, e] of ARMS) {
-          const sh = lm[s], el = lm[e];
+        for (const [s, e, wIdx] of ARMS) {
+          const sh = lm[s], el = lm[e], wr = lm[wIdx];
           if (!sh) continue;
-          const bent = el ? angleBetween(sh, el, clasp) < ELBOW_LOCK_DEG : false;
-          if (bent) bentNow[s === LM.leftShoulder ? "left" : "right"] = true;
+          const key = s === LM.leftShoulder ? "left" : "right";
+          // 3D pose angle (shoulder→elbow→wrist): z removes the foreshortening
+          // that made straight arms read ~150° in 2D when leaning at the camera
+          let bent = bentRef.current[key];
+          if (el && wr) {
+            const raw = angleBetween3D(sh, el, wr);
+            const sm = armAngleRef.current[key] * 0.7 + raw * 0.3;
+            armAngleRef.current[key] = sm;
+            bent = bent ? sm < BEND_CLEAR_DEG : sm < BEND_TRIP_DEG;
+          }
+          bentNow[key] = bent;
           const color = bent ? "#ef4444" : "#4ade80";
 
           ctx.strokeStyle = color;
