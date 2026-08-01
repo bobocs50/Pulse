@@ -10,7 +10,15 @@ let ctx: AudioContext | null = null;
 const buffers = new Map<string, AudioBuffer>();
 
 export function getAudioContext(): AudioContext {
-  if (!ctx) ctx = new AudioContext();
+  if (!ctx) {
+    // iOS 17+: declare "playback" so the hardware silent switch doesn't mute
+    // Web Audio (default treats it as sound effects, silenced by the switch)
+    try {
+      const nav = navigator as Navigator & { audioSession?: { type: string } };
+      if (nav.audioSession) nav.audioSession.type = "playback";
+    } catch { /* older iOS — silent switch must be off */ }
+    ctx = new AudioContext();
+  }
   return ctx;
 }
 
