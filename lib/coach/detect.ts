@@ -23,7 +23,6 @@ export interface DetectState {
   lastY: number;            // previous frame's signal (-1 = unseeded), for the jump guard
   lastSource: "hands" | "pose" | null; // signal source last frame — reset on switch
   lastPeakAt: number;       // ms timestamp of last accepted peak
-  peakTimes: number[];      // last 4 accepted peak timestamps (BPM over last 3 intervals)
 }
 
 export function createDetectState(): DetectState {
@@ -37,7 +36,6 @@ export function createDetectState(): DetectState {
     lastY: -1,
     lastSource: null,
     lastPeakAt: 0,
-    peakTimes: [],
   };
 }
 
@@ -152,16 +150,3 @@ export function detectPeak(
   return false;
 }
 
-// 60 / mean inter-peak interval, over the last 3 intervals max.
-// Intervals spanning a stall (>2s) are discarded — no "bpm 18" after recovery.
-export function currentBpm(state: DetectState): number | null {
-  const t = state.peakTimes;
-  if (t.length < 2) return null;
-  let sum = 0, n = 0;
-  for (let i = 1; i < t.length; i++) {
-    const dt = t[i] - t[i - 1];
-    if (dt <= 2000) { sum += dt; n++; }
-  }
-  if (!n) return null;
-  return Math.round(60000 / (sum / n));
-}
