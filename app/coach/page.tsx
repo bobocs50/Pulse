@@ -56,7 +56,7 @@ export default function CoachPage() {
   const [count, setCount]       = useState(0);
   const [bpm, setBpm]           = useState<number | null>(null);
   const [phase, setPhase]       = useState<Phase>("IDLE");
-  const [tab, setTab]           = useState<"tracking" | "manual">("tracking");
+  const [tab, setTab]           = useState<"tracking" | "coach" | "manual">("tracking");
   const [metroOn, setMetroOn]   = useState(false);
   const [beatCount, setBeatCount] = useState(0); // 1..30, manual metronome
 
@@ -352,7 +352,7 @@ export default function CoachPage() {
       {/* Tabs */}
       <div className="pt-12 safe-top px-4 pb-3 bg-white border-b border-zinc-200">
         <div className="flex bg-zinc-100 rounded-full p-1 gap-1">
-          {(["tracking", "manual"] as const).map(t => (
+          {(["tracking", "coach", "manual"] as const).map(t => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -366,8 +366,9 @@ export default function CoachPage() {
         </div>
       </div>
 
-      {/* ---- Tracking panel (stays mounted — camera keeps its stream) ---- */}
-      <div className={`flex-1 flex-col min-h-0 ${tab === "tracking" ? "flex" : "hidden"}`}>
+      {/* ---- Tracking panel (stays mounted — camera keeps its stream).
+           "coach" = tracking + metronome combined ---- */}
+      <div className={`flex-1 flex-col min-h-0 ${tab === "tracking" || tab === "coach" ? "flex" : "hidden"}`}>
 
         {/* Instruction banner — phase-driven */}
         <div className={`mx-2 mt-2 rounded-2xl text-center px-4 py-3 ${
@@ -447,6 +448,28 @@ export default function CoachPage() {
             bpm <b className="tabular-nums">{bpm ?? "—"}</b>
           </span>
         </div>
+
+        {/* Coach mode: compact metronome controls under the chips */}
+        {tab === "coach" && (
+          <div className="flex items-center justify-center gap-3 px-2 pt-1 pb-1">
+            <div
+              className="w-9 h-9 rounded-full bg-rose-200 flex items-center justify-center"
+              style={metroOn ? { animation: "beatPulse 0.545s ease-out infinite" } : undefined}
+            >
+              <span className="text-rose-900 text-xs font-black tabular-nums">
+                {metroOn ? beatCount : "–"}
+              </span>
+            </div>
+            <button
+              onClick={toggleMetronome}
+              className={`px-6 py-2 rounded-full text-sm font-bold active:scale-95 transition-transform ${
+                metroOn ? "bg-rose-300 text-rose-950" : "bg-emerald-200 text-emerald-900"
+              }`}
+            >
+              {metroOn ? "Stop beat" : "Start beat"}
+            </button>
+          </div>
+        )}
 
         {/* Y-trace removed from demo UI. drawYTrace no-ops without the canvas;
             re-add to tune peak detection:
