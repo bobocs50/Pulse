@@ -4,13 +4,14 @@ import { useCamera } from "@/lib/pose/useCamera";
 import { usePose } from "@/lib/pose/usePose";
 import { getCameraFeedback } from "@/lib/vision/camera-feedback";
 import type { CameraFeedback } from "@/types/vision";
-import { LM, angleBetween3D } from "@/lib/vision/geometry";
+import { LM } from "@/lib/vision/geometry";
 
-// Elbow color thresholds on the SMOOTHED 3D angle, with hysteresis so the
-// V doesn't flicker. Calibrated against real stances via the on-overlay
-// angle readout — the compression lean reads lower than intuition suggests.
-const BEND_TRIP_DEG  = 135;
-const BEND_CLEAR_DEG = 143;
+// Arm-straightness = elbow's lateral offset from the shoulder→clasp line,
+// as a fraction of that line's length. Elbow angles (2D and 3D) both
+// collapse under foreshortening in the compression lean — lateral flare
+// doesn't. Measured: straight ~0.06-0.07, flared ~0.17. Hysteresis band:
+const FLARE_TRIP  = 0.13; // go red above
+const FLARE_CLEAR = 0.10; // back to green below
 import { createDetectState, detectPeak, currentBpm, TRACE_LEN } from "@/lib/coach/detect";
 import { createSessionState, transition } from "@/lib/coach/state";
 import type { Phase } from "@/lib/coach/state";
@@ -104,7 +105,7 @@ export default function CoachPage() {
   const detectRef  = useRef(createDetectState());
   const sessionRef = useRef(createSessionState());
   const bentRef    = useRef({ left: false, right: false }); // per-arm bent state (set by drawOverlay)
-  const armAngleRef = useRef({ left: 180, right: 180 });     // smoothed 3D elbow angles
+  const armFlareRef = useRef({ left: 0, right: 0 });         // smoothed elbow flare ratios
 
   // Throttle ref for React state updates (~10fps)
   const lastStateUpdate = useRef(0);
@@ -248,18 +249,19 @@ export default function CoachPage() {
       if (claspX !== null && claspY !== null) {
         ctx.lineCap = "round";
         const bentNow = { left: false, right: false };
-        for (const [s, e, wIdx] of ARMS) {
-          const sh = lm[s], el = lm[e], wr = lm[wIdx];
+        for (const [s, e] of ARMS) {
+          const sh = lm[s], el = lm[e];
           if (!sh) continue;
           const key = s === LM.leftShoulder ? "left" : "right";
-          // 3D pose angle (shoulder→elbow→wrist): z removes the foreshortening
-          // that made straight arms read ~150° in 2D when leaning at the camera
           let bent = bentRef.current[key];
-          if (el && wr) {
-            const raw = angleBetween3D(sh, el, wr);
-            const sm = armAngleRef.current[key] * 0.7 + raw * 0.3;
-            armAngleRef.current[key] = sm;
-            bent = bent ? sm < BEND_CLEAR_DEG : sm < BEND_TRIP_DEG;
+          if (el) {
+            // perpendicular distance of elbow from the shoulder→clasp line, / line length
+            const vx = claspX - sh.x, vy = claspY - sh.y;
+            const len2 = vx * vx + vy * vy || 1;
+            const raw = Math.abs(vx * (el.y - sh.y) - vy * (el.x - sh.x)) / len2;
+            const sm = armFlareRef.current[key] * 0.7 + raw * 0.3;
+            armFlareRef.current[key] = sm;
+            bent = bent ? sm > FLARE_CLEAR : sm > FLARE_TRIP;
           }
           bentNow[key] = bent;
           const color = bent ? "#ef4444" : "#4ade80";
@@ -280,14 +282,19 @@ export default function CoachPage() {
             ctx.beginPath();
             ctx.arc(x(el.x), y(el.y), 7, 0, Math.PI * 2);
             ctx.fill();
-            // Live angle readout — calibration aid, cheap to delete later
-            const label = `${Math.round(armAngleRef.current[key])}°`;
+            // Live flare readout — calibration aid; un-mirror text on front camera
+            const label = `${Math.round(armFlareRef.current[key] * 100)}`;
+            const tx = x(el.x) + 16, ty = y(el.y) - 12;
+            ctx.save();
+            if (facing === "user") { ctx.scale(-1, 1); ctx.translate(-w, 0); }
+            const fx = facing === "user" ? w - tx : tx;
             ctx.font = "700 26px system-ui";
             ctx.lineWidth = 4;
             ctx.strokeStyle = "rgba(0,0,0,0.7)";
-            ctx.strokeText(label, x(el.x) + 16, y(el.y) - 12);
+            ctx.strokeText(label, fx, ty);
             ctx.fillStyle = "#ffffff";
-            ctx.fillText(label, x(el.x) + 16, y(el.y) - 12);
+            ctx.fillText(label, fx, ty);
+            ctx.restore();
           }
         }
         // Clasp vertex anchor
