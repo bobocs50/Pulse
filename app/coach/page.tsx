@@ -9,6 +9,7 @@ import { ELBOW_LOCK_DEG } from "@/lib/coach/score";
 import { createDetectState, detectPeak, currentBpm, TRACE_LEN } from "@/lib/coach/detect";
 import { createSessionState, transition } from "@/lib/coach/state";
 import type { Phase } from "@/lib/coach/state";
+import { ensureRunning, loadBuffer, startMetronome, stopMetronome, setOnBeat, getAudioContext } from "@/lib/audio/engine";
 
 const INSTRUCTIONS: Record<Phase, { step: string; title: string; hint: string }> = {
   IDLE:          { step: "STEP 1", title: "Get ready",          hint: "Stand over the pillow · clasp hands · lock elbows" },
@@ -55,10 +56,41 @@ export default function CoachPage() {
   const [count, setCount]       = useState(0);
   const [bpm, setBpm]           = useState<number | null>(null);
   const [phase, setPhase]       = useState<Phase>("IDLE");
+  const [tab, setTab]           = useState<"tracking" | "coach" | "manual">("tracking");
+  const [metroOn, setMetroOn]   = useState(false);
+  const [beatCount, setBeatCount] = useState(0); // 1..30, manual metronome
+
+  const [audioState, setAudioState] = useState("idle");
+
+  // Manual metronome: beat callback drives the count display; cleanup stops audio
+  useEffect(() => {
+    setOnBeat(b => {
+      setBeatCount((b % 30) + 1);
+      setAudioState(getAudioContext().state);
+    });
+    return () => {
+      setOnBeat(null);
+      stopMetronome();
+    };
+  }, []);
+
+  async function toggleMetronome() {
+    if (metroOn) {
+      stopMetronome();
+      setMetroOn(false);
+      return;
+    }
+    await ensureRunning(); // iOS: resume on every gesture path
+    setAudioState(getAudioContext().state);
+    loadBuffer("click").catch(() => {}); // real click.mp3 if present, synth otherwise
+    startMetronome();
+    setMetroOn(true);
+  }
 
   // Detection + session state live in refs — 30fps loop never touches React state
   const detectRef  = useRef(createDetectState());
   const sessionRef = useRef(createSessionState());
+  const bentRef    = useRef({ left: false, right: false }); // per-arm bent state (set by drawOverlay)
 
   // Throttle ref for React state updates (~10fps)
   const lastStateUpdate = useRef(0);
@@ -198,11 +230,15 @@ export default function CoachPage() {
 
       if (claspX !== null && claspY !== null) {
         ctx.lineCap = "round";
-        for (const [s, e, wIdx] of ARMS) {
-          const sh = lm[s], el = lm[e], wr = lm[wIdx];
+        // Judge the geometry we draw: angle at the elbow between shoulder and clasp
+        const clasp = { x: claspX, y: claspY, z: 0, visibility: 1 };
+        const bentNow = { left: false, right: false };
+        for (const [s, e] of ARMS) {
+          const sh = lm[s], el = lm[e];
           if (!sh) continue;
-          const bent = el && wr ? angleBetween(sh, el, wr) < ELBOW_LOCK_DEG : false;
-          const color = bent ? "#ef4444" : "rgba(255,255,255,0.95)";
+          const bent = el ? angleBetween(sh, el, clasp) < ELBOW_LOCK_DEG : false;
+          if (bent) bentNow[s === LM.leftShoulder ? "left" : "right"] = true;
+          const color = bent ? "#ef4444" : "#4ade80";
 
           ctx.strokeStyle = color;
           ctx.lineWidth = 6;
@@ -223,11 +259,14 @@ export default function CoachPage() {
           }
         }
         // Clasp vertex anchor
-        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.fillStyle = "#4ade80";
         ctx.beginPath();
         ctx.arc(x(claspX), y(claspY), 10, 0, Math.PI * 2);
         ctx.fill();
         refX = claspX;
+        bentRef.current = bentNow;
+      } else {
+        bentRef.current = { left: false, right: false };
       }
     }
 
@@ -293,10 +332,13 @@ export default function CoachPage() {
     lastStateUpdate.current = now;
 
     const lm = landmarksRef.current;
-    // Hands tracked = signal is fine; suppress body-framing nags entirely
-    // (close stance keeps a partial pose that fails the completeness checks)
+    const { left, right } = bentRef.current;
+    // Posture correction outranks framing nags; hands tracked = framing is fine
     setFeedback(
-      handsRef.current?.length ? null
+      left && right ? { message: "Fix your posture — straighten your arms", type: "warning" }
+        : left  ? { message: "Straighten your left arm", type: "warning" }
+        : right ? { message: "Straighten your right arm", type: "warning" }
+        : handsRef.current?.length ? null
         : lm ? getCameraFeedback(lm)
         : { message: "No person detected", type: "warning" }
     );
@@ -304,80 +346,166 @@ export default function CoachPage() {
   }
 
   return (
-    <div className="h-full w-full bg-black flex flex-col overflow-hidden">
+    <div className="h-full w-full bg-zinc-50 text-zinc-900 flex flex-col overflow-hidden">
+      <style>{`@keyframes beatPulse { 0% { transform: scale(1.08); } 100% { transform: scale(1); } }`}</style>
 
-      {/* 1. Instruction banner — phase-driven, never overlaps video */}
-      <div className="bg-sky-600 text-white text-center px-4 pt-12 pb-3 safe-top">
-        <p className="text-sky-200 text-[11px] font-bold tracking-widest">{INSTRUCTIONS[phase].step}</p>
-        <p className="font-bold text-xl leading-tight">{INSTRUCTIONS[phase].title}</p>
-        <p className="text-sky-100 text-sm mt-0.5">{INSTRUCTIONS[phase].hint}</p>
+      {/* Tabs */}
+      <div className="pt-12 safe-top px-4 pb-3 bg-white border-b border-zinc-200">
+        <div className="flex bg-zinc-100 rounded-full p-1 gap-1">
+          {(["tracking", "coach", "manual"] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`flex-1 py-2 rounded-full text-sm font-semibold capitalize transition-colors ${
+                tab === t ? "bg-sky-200 text-sky-900" : "text-zinc-500"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* 2. Camera card — object-cover on BOTH fills the portrait card and keeps
-          the overlay aligned (identical crop). Landscape streams get center-cropped. */}
-      <div className="relative flex-1 m-2 rounded-2xl overflow-hidden bg-zinc-900">
-        <video
-          ref={videoRef}
-          className="absolute inset-0 w-full h-full object-cover"
-          style={facing === "user" ? { transform: "scaleX(-1)" } : undefined}
-          playsInline
-          muted
-        />
-        <canvas
-          ref={canvasRef}
-          className="absolute inset-0 w-full h-full object-cover"
-          style={facing === "user" ? { transform: "scaleX(-1)" } : undefined}
-        />
+      {/* ---- Tracking panel (stays mounted — camera keeps its stream).
+           "coach" = tracking + metronome combined ---- */}
+      <div className={`flex-1 flex-col min-h-0 ${tab === "tracking" || tab === "coach" ? "flex" : "hidden"}`}>
 
-        {/* Count badge */}
-        <div className="absolute top-3 left-3 bg-green-500 text-black font-extrabold text-2xl tabular-nums rounded-lg px-3 py-1 z-10">
-          {count} / 30
+        {/* Instruction banner — phase-driven */}
+        <div className={`mx-2 mt-2 rounded-2xl text-center px-4 py-3 ${
+          phase === "STALLED" ? "bg-rose-100" : "bg-sky-100"
+        }`}>
+          <p className={`text-[11px] font-bold tracking-widest ${phase === "STALLED" ? "text-rose-500" : "text-sky-500"}`}>
+            {INSTRUCTIONS[phase].step}
+          </p>
+          <p className={`font-bold text-xl leading-tight ${phase === "STALLED" ? "text-rose-900" : "text-sky-900"}`}>
+            {INSTRUCTIONS[phase].title}
+          </p>
+          <p className={`text-sm mt-0.5 ${phase === "STALLED" ? "text-rose-700" : "text-sky-700"}`}>
+            {INSTRUCTIONS[phase].hint}
+          </p>
         </div>
 
-        {/* Flip camera */}
-        <button
-          onClick={flip}
-          className="absolute top-3 right-3 z-10 bg-zinc-800/80 backdrop-blur-sm rounded-full px-3 py-2 text-white text-xs font-semibold"
+        {/* Camera card — object-cover on BOTH fills the card and keeps overlay aligned */}
+        <div className="relative flex-1 m-2 rounded-2xl overflow-hidden bg-zinc-900 shadow-sm">
+          <video
+            ref={videoRef}
+            className="absolute inset-0 w-full h-full object-cover"
+            style={facing === "user" ? { transform: "scaleX(-1)" } : undefined}
+            playsInline
+            muted
+          />
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 w-full h-full object-cover"
+            style={facing === "user" ? { transform: "scaleX(-1)" } : undefined}
+          />
+
+          {/* Flip camera */}
+          <button
+            onClick={flip}
+            className="absolute top-3 right-3 z-10 bg-white/80 backdrop-blur-sm rounded-full px-3 py-2 text-zinc-700 text-xs font-semibold"
+          >
+            Flip
+          </button>
+
+          {/* Camera feedback toast — top, count owns the bottom */}
+          {feedback && (
+            <div className="absolute top-3 inset-x-3 z-10 flex justify-center pointer-events-none">
+              <div className="bg-amber-200/95 backdrop-blur-sm rounded-xl px-4 py-2">
+                <p className="text-amber-950 font-semibold text-sm">{feedback.message}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Count — huge, bottom, over a fading gradient so video stays visible */}
+          <div className="absolute bottom-0 inset-x-0 z-10 pointer-events-none bg-gradient-to-t from-black/70 via-black/25 to-transparent pt-16 pb-2 flex items-end justify-center">
+            <span className="text-white font-black text-[7rem] leading-none tabular-nums drop-shadow-lg">
+              {count}
+            </span>
+            <span className="text-white/70 font-bold text-3xl mb-3 ml-2">/ 30</span>
+          </div>
+
+          {status === "loading" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-zinc-900 z-20">
+              <p className="text-zinc-400 text-lg">Starting camera…</p>
+            </div>
+          )}
+          {status === "blocked" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-zinc-900 z-20 px-8 text-center">
+              <p className="text-zinc-300 text-lg">Camera permission denied. Allow camera access and reload.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Chip row */}
+        <div className="flex justify-center gap-2 px-2 pb-1 text-sm">
+          <span className="bg-violet-100 text-violet-900 rounded-full px-4 py-1">
+            score <b className="tabular-nums" style={{
+              color: score === null ? "#a1a1aa" : score >= 80 ? "#059669" : score >= 50 ? "#d97706" : "#e11d48"
+            }}>{score ?? "—"}</b>
+          </span>
+          <span className="bg-emerald-100 text-emerald-900 rounded-full px-4 py-1">
+            bpm <b className="tabular-nums">{bpm ?? "—"}</b>
+          </span>
+        </div>
+
+        {/* Coach mode: compact metronome controls under the chips */}
+        {tab === "coach" && (
+          <div className="flex items-center justify-center gap-3 px-2 pt-1 pb-1">
+            <div
+              className="w-9 h-9 rounded-full bg-rose-200 flex items-center justify-center"
+              style={metroOn ? { animation: "beatPulse 0.545s ease-out infinite" } : undefined}
+            >
+              <span className="text-rose-900 text-xs font-black tabular-nums">
+                {metroOn ? beatCount : "–"}
+              </span>
+            </div>
+            <button
+              onClick={toggleMetronome}
+              className={`px-6 py-2 rounded-full text-sm font-bold active:scale-95 transition-transform ${
+                metroOn ? "bg-rose-300 text-rose-950" : "bg-emerald-200 text-emerald-900"
+              }`}
+            >
+              {metroOn ? "Stop beat" : "Start beat"}
+            </button>
+          </div>
+        )}
+
+        {/* Y-trace removed from demo UI. drawYTrace no-ops without the canvas;
+            re-add to tune peak detection:
+            <canvas ref={traceRef} width={390} height={80} className="w-full h-20 rounded-lg" /> */}
+        <div className="pb-3 safe-bottom" />
+      </div>
+
+      {/* ---- Manual panel: metronome ---- */}
+      <div className={`flex-1 flex-col items-center justify-center gap-8 px-6 ${tab === "manual" ? "flex" : "hidden"}`}>
+        <div className="text-center">
+          <p className="text-2xl font-bold">Metronome</p>
+          <p className="text-zinc-500 text-sm mt-1">110 BPM — push down on every click</p>
+        </div>
+
+        <div
+          className="w-48 h-48 rounded-full bg-rose-200 flex items-center justify-center shadow-inner"
+          style={metroOn ? { animation: "beatPulse 0.545s ease-out infinite" } : undefined}
         >
-          Flip
+          <span className="text-7xl font-black tabular-nums text-rose-900">
+            {metroOn ? beatCount : "—"}
+          </span>
+        </div>
+
+        <button
+          onClick={toggleMetronome}
+          className={`w-full max-w-xs py-4 rounded-2xl text-xl font-bold active:scale-95 transition-transform ${
+            metroOn ? "bg-rose-300 text-rose-950" : "bg-emerald-200 text-emerald-900"
+          }`}
+        >
+          {metroOn ? "Stop" : "Start metronome"}
         </button>
 
-        {/* Camera feedback toast */}
-        {feedback && (
-          <div className="absolute bottom-3 inset-x-3 z-10 flex justify-center pointer-events-none">
-            <div className="bg-amber-500/90 backdrop-blur-sm rounded-xl px-4 py-2">
-              <p className="text-black font-semibold text-sm">{feedback.message}</p>
-            </div>
-          </div>
-        )}
-
-        {status === "loading" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black z-20">
-            <p className="text-zinc-400 text-lg">Starting camera…</p>
-          </div>
-        )}
-        {status === "blocked" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black z-20 px-8 text-center">
-            <p className="text-zinc-300 text-lg">Camera permission denied. Allow camera access and reload.</p>
-          </div>
-        )}
-      </div>
-
-      {/* 3. Chip row */}
-      <div className="flex justify-center gap-2 px-2 pb-1 text-sm text-zinc-300">
-        <span className="bg-zinc-800 rounded-full px-4 py-1">
-          score <b className="tabular-nums" style={{
-            color: score === null ? "#71717a" : score >= 80 ? "#22c55e" : score >= 50 ? "#f59e0b" : "#ef4444"
-          }}>{score ?? "—"}</b>
-        </span>
-        <span className="bg-zinc-800 rounded-full px-4 py-1">
-          bpm <b className="tabular-nums text-white">{bpm ?? "—"}</b>
-        </span>
-      </div>
-
-      {/* 4. Y-trace strip (peak-tuning interface — non-optional) */}
-      <div className="px-2 pb-4 safe-bottom">
-        <canvas ref={traceRef} width={390} height={80} className="w-full h-20 rounded-lg" />
+        <p className="text-zinc-400 text-xs text-center max-w-xs">
+          30 pushes, then 2 breaths. Counts loop automatically.
+        </p>
+        <p className="text-zinc-300 text-[10px] tabular-nums">audio: {audioState} · beat {beatCount}</p>
       </div>
     </div>
   );

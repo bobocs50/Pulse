@@ -6,7 +6,7 @@ import { LM, angleBetween, nearArm } from "@/lib/vision/geometry";
 
 const BPM_TARGET = 110;
 const BPM_WINDOW = [100, 120] as const;
-export const ELBOW_LOCK_DEG = 160;   // arms straight threshold
+export const ELBOW_LOCK_DEG = 165;   // arms straight threshold (tightened from 160 after live testing)
 const WINDOW = 5;              // rolling window size
 
 export interface CompressionSample {
