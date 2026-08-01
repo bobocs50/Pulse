@@ -1,7 +1,7 @@
 // Adapted from Rehabify camera-feedback.ts
-// Added: side-view orientation check (CPR requires side view)
+// Front-view checks: demo position faces the camera (standing at a table)
 import type { Landmark, CameraFeedback } from "@/types/vision";
-import { LM, distance2D, midpoint, isSideView } from "./geometry";
+import { LM } from "./geometry";
 
 export function getCameraFeedback(lm: Landmark[]): CameraFeedback {
   if (!lm || lm.length === 0) return { message: "No person detected", type: "warning" };
@@ -35,8 +35,14 @@ export function getCameraFeedback(lm: Landmark[]): CameraFeedback {
   if (lm.some(l => vis(l) && l.x < m)) return { message: "Too close to edge", type: "warning" };
   if (lm.some(l => vis(l) && l.x > 1 - m)) return { message: "Too close to edge", type: "warning" };
 
-  // CPR-specific: require side view
-  if (!isSideView(lm)) return { message: "Turn sideways to the camera", type: "warning" };
+  // Front view: shoulders square to the camera, hands trackable, roughly centred
+  const lsh = lm[LM.leftShoulder];
+  const rsh = lm[LM.rightShoulder];
+  if (!vis(lsh) || !vis(rsh)) return { message: "Face the camera", type: "warning" };
+  if (!vis(lm[LM.leftWrist]) && !vis(lm[LM.rightWrist]))
+    return { message: "Keep your hands in view", type: "warning" };
+  const cx = (lsh.x + rsh.x) / 2;
+  if (cx < 0.2 || cx > 0.8) return { message: "Step to the centre", type: "warning" };
 
   return null;
 }

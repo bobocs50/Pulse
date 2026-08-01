@@ -9,9 +9,9 @@ export interface FilterState {
   filters: OneEuroFilter[][];
 }
 
-export function createFilter(): FilterState {
+export function createFilter(count = 33): FilterState {
   return {
-    filters: Array.from({ length: 33 }, () => [
+    filters: Array.from({ length: count }, () => [
       new OneEuroFilter(CFG.freq, CFG.mincutoff, CFG.beta, CFG.dcutoff),
       new OneEuroFilter(CFG.freq, CFG.mincutoff, CFG.beta, CFG.dcutoff),
       new OneEuroFilter(CFG.freq, CFG.mincutoff, CFG.beta, CFG.dcutoff),

@@ -1,13 +1,15 @@
 // Runs off main thread — keeps Web Audio scheduler jitter-free
 // MediaPipe CPU mode here; GPU delegate requires OffscreenCanvas WebGL (test on phone)
-import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
+import { FilesetResolver, PoseLandmarker, HandLandmarker } from "@mediapipe/tasks-vision";
 import type { Landmark, WorkerInMessage, WorkerOutMessage } from "@/types/vision";
 
-const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-const MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+// Vendored locally — venue Wi-Fi must not be able to kill the demo
+const WASM_URL = "/mediapipe/wasm";
+const MODEL_URL = "/models/pose_landmarker_lite.task";
+const HAND_MODEL_URL = "/models/hand_landmarker.task";
 
 let landmarker: PoseLandmarker | null = null;
+let handLandmarker: HandLandmarker | null = null;
 let lastTs = 0;
 
 async function init() {
@@ -18,6 +20,15 @@ async function init() {
     numPoses: 2, // rescuer + patient on floor — pick more vertical pose below
     minPoseDetectionConfidence: 0.5,
     minPosePresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+  });
+  // Hands: precise anchors on the clasped hands — the compression signal
+  handLandmarker = await HandLandmarker.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: HAND_MODEL_URL },
+    runningMode: "VIDEO",
+    numHands: 2,
+    minHandDetectionConfidence: 0.5,
+    minHandPresenceConfidence: 0.5,
     minTrackingConfidence: 0.5,
   });
   const msg: WorkerOutMessage = { type: "ready" };
@@ -41,7 +52,12 @@ self.onmessage = async (e: MessageEvent<WorkerInMessage>) => {
   const { type, bitmap, timestamp } = e.data;
 
   if (type === "init") {
-    await init();
+    try {
+      await init();
+    } catch (err) {
+      const msg: WorkerOutMessage = { type: "error", error: String(err) };
+      self.postMessage(msg);
+    }
     return;
   }
 
@@ -51,15 +67,25 @@ self.onmessage = async (e: MessageEvent<WorkerInMessage>) => {
     lastTs = ts;
 
     let landmarks: Landmark[] | null = null;
+    let hands: Landmark[][] | null = null;
     try {
       const result = landmarker.detectForVideo(bitmap, ts);
       landmarks = selectRescuer(result.landmarks as Landmark[][]);
     } catch {
       // skip bad frame
     }
+    try {
+      if (handLandmarker) {
+        const hr = handLandmarker.detectForVideo(bitmap, ts);
+        // Hand model has no visibility score — normalize to our Landmark shape
+        hands = hr.landmarks.map(h => h.map(p => ({ x: p.x, y: p.y, z: p.z, visibility: 1 })));
+      }
+    } catch {
+      // skip bad frame
+    }
     bitmap.close();
 
-    const msg: WorkerOutMessage = { type: "landmarks", landmarks, timestamp: ts };
+    const msg: WorkerOutMessage = { type: "landmarks", landmarks, hands, timestamp: ts };
     self.postMessage(msg);
   }
 };
