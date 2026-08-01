@@ -20,7 +20,9 @@ export function createSessionState(): SessionState {
 }
 
 const STALL_MS = 1500;
-const BREATH_MS = 10000;
+// The spoken breath prompt is 10.5s of speech plus 600ms between lines ≈ 12.9s.
+// The window has to outlast it or the summary cuts the last line off mid-word.
+export const BREATH_MS = 15000;
 
 export function transition(
   state: SessionState,

@@ -31,10 +31,15 @@ const NUMBERS = ["one","two","three","four","five","six","seven","eight","nine",
 
 const TEXTS = {
   ...Object.fromEntries(NUMBERS.map(n => [n, n.replace("-", " ")])),
+  // Breath phase — one line per on-screen step, spoken in this order with a pause
+  // between each. Head tilt WITHOUT the chin lift does not open the airway, and an
+  // unsealed mouth or a hard fast blow puts the air in the stomach — both were
+  // missing from the earlier three-line version.
   "stop-compressions":  "Stop compressions.",
-  "tilt-and-pinch":     "Tilt the head back and pinch the nose.",
-  "two-breaths":        "Give two breaths.",
-  "watch-for-rise":     "Watch for the chest to rise.",
+  "tilt-and-lift":      "Tilt the head back and lift the chin.",
+  "pinch-and-seal":     "Pinch the nose. Seal your mouth over theirs.",
+  "blow-one-second":    "Blow steadily for about one second.",
+  "watch-then-repeat":  "Watch the chest rise, then give a second breath.",
   "resume-compressions":"Resume compressions now.",
   "swap-if-you-can":    "Swap rescuers if you can.",
   "straighten-arms":    "Straighten your arms.",

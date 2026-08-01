@@ -40,11 +40,12 @@ export const CUE: Record<string, string> = {
   // Setup — step 0: camera placement
   placePhone: "/audio/place-phone.mp3",
 
-  // Breath phase — played in this order at compression 30
+  // Breath phase — played in this order at compression 20, one line per on-screen step
   stopCompressions:   "/audio/stop-compressions.mp3",
-  tiltAndPinch:       "/audio/tilt-and-pinch.mp3",
-  twoBreaths:         "/audio/two-breaths.mp3",
-  watchForRise:       "/audio/watch-for-rise.mp3",
+  tiltAndLift:        "/audio/tilt-and-lift.mp3",
+  pinchAndSeal:       "/audio/pinch-and-seal.mp3",
+  blowOneSecond:      "/audio/blow-one-second.mp3",
+  watchThenRepeat:    "/audio/watch-then-repeat.mp3",
   letItRise:          "/audio/let-it-rise.mp3",
   resumeCompressions: "/audio/resume-compressions.mp3",
   swapIfYouCan:       "/audio/swap-if-you-can.mp3",

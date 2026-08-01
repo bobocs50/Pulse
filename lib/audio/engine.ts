@@ -96,12 +96,20 @@ export function playNow(name: string, onEnded?: () => void): void {
   voiceSrc = src;
 }
 
-// Chain cues back-to-back on the single voice channel. Each waits for the previous
-// to end, so the breath prompt never talks over itself.
-export function playSequence(names: string[]): void {
-  if (names.length === 0) return;
-  const [head, ...rest] = names;
-  playNow(head, () => playSequence(rest));
+// Chain cues on the single voice channel. Each waits for the previous to end, so the
+// breath prompt never talks over itself. gapMs is the silence between lines — running
+// them back-to-back reads as rushed when someone is trying to follow along.
+// onStep fires with the index about to be spoken, then -1 when the chain finishes.
+export function playSequence(names: string[], gapMs = 0, onStep?: (index: number) => void): void {
+  let i = 0;
+  const step = () => {
+    if (i >= names.length) { onStep?.(-1); return; }
+    const idx = i++;
+    onStep?.(idx);
+    // An interrupted cue never calls back (playNow drops it), so the chain stops too.
+    playNow(names[idx], () => setTimeout(step, gapMs));
+  };
+  step();
 }
 
 export function playCorrection(name: string): void {

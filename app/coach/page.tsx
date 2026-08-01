@@ -10,7 +10,7 @@ import { getCameraFeedback } from "@/lib/vision/camera-feedback";
 const FLARE_TRIP  = 0.13; // goes red above this
 const FLARE_CLEAR = 0.10; // recovers to green below this
 import { createDetectState, detectPeak, TRACE_LEN } from "@/lib/coach/detect";
-import { createSessionState, transition } from "@/lib/coach/state";
+import { createSessionState, transition, BREATH_MS } from "@/lib/coach/state";
 import type { Phase } from "@/lib/coach/state";
 import { ensureRunning, loadBuffer, startMetronome, stopMetronome, preloadAll, playNow, playSequence, playCorrection, getFrequencyData } from "@/lib/audio/engine";
 import { COUNT_CUES } from "@/lib/audio/cues";
@@ -25,6 +25,16 @@ const WORKER_LONG_SIDE = 720;
 const ARMS: [number, number, number][] = [
   [11, 13, 15], // left: shoulder, elbow, wrist
   [12, 14, 16], // right
+];
+
+// Breath prompt: cue → the line shown on screen while it plays. Index 0 is the
+// "stop" call, which is the card's heading, so the step rows start at index 1.
+const BREATH_CUES = ["stopCompressions", "tiltAndLift", "pinchAndSeal", "blowOneSecond", "watchThenRepeat"];
+const BREATH_STEPS = [
+  "Tilt the head back, lift the chin",
+  "Pinch the nose, seal your mouth",
+  "Blow steadily for one second",
+  "Watch the chest rise, then repeat",
 ];
 
 const BODY_CONNECTIONS: [number, number][] = [
@@ -55,6 +65,7 @@ export default function CoachPage() {
   const [elapsed, setElapsed]   = useState(0);
   const [toast, setToast]       = useState<string | null>(null);
   const [breathLeft, setBreathLeft] = useState(0);
+  const [breathStep, setBreathStep] = useState(-1);
   const breathEndsAtRef         = useRef<number | null>(null);
   const sessionStartRef         = useRef<number | null>(null);
   const toastClearRef           = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -327,12 +338,17 @@ export default function CoachPage() {
       stopMetronome();
       setMetroOn(false);
       setCount(20);
-      breathEndsAtRef.current = now + 10000;
-      setBreathLeft(10);
-      playSequence(["stopCompressions", "tiltAndPinch", "twoBreaths", "watchForRise"]);
+      breathEndsAtRef.current = now + BREATH_MS;
+      setBreathLeft(Math.round(BREATH_MS / 1000));
+      setBreathStep(0);
+      // 600ms between lines: back-to-back, this reads as a rush and you can't act on
+      // step one before step two arrives. onStep drives the on-screen highlight, so
+      // the card and the voice are the same instruction — never two at once.
+      playSequence(BREATH_CUES, 600, setBreathStep);
     } else if (next.phase === "DONE" && prev.phase !== "DONE") {
       breathEndsAtRef.current = null;
       setBreathLeft(0);
+      setBreathStep(-1);
       // Nothing is spoken here: the breath sequence is the last thing heard, and a
       // closing line would land on top of its tail.
     }
@@ -686,13 +702,27 @@ export default function CoachPage() {
               <p className="text-[11px] font-bold tracking-[0.2em] text-sky-300 uppercase mb-3">Stop compressions</p>
               <p className="text-[2.4rem] font-black text-white leading-[1.05] mb-5">Two breaths</p>
 
-              <div className="flex flex-col gap-2 mb-7 w-full max-w-[300px]">
-                {["Tilt the head back", "Pinch the nose", "Breathe until the chest rises"].map(s => (
-                  <div key={s} className="rounded-xl px-4 py-2.5 text-white/90 text-[15px] font-semibold"
-                    style={{ background: "rgba(255,255,255,0.10)" }}>
-                    {s}
-                  </div>
-                ))}
+              {/* Steps light up one at a time, driven by the voice — reading four lines
+                  at once while a fifth is spoken is what made this feel rushed. */}
+              <div className="flex flex-col gap-2 mb-7 w-full max-w-[320px]">
+                {BREATH_STEPS.map((s, i) => {
+                  const active = breathStep - 1 === i;
+                  const past   = breathStep - 1 > i || breathStep === -1;
+                  return (
+                    <div
+                      key={s}
+                      className="rounded-xl px-4 py-2.5 text-[15px] font-semibold"
+                      style={{
+                        background: active ? "rgba(125,211,252,0.22)" : "rgba(255,255,255,0.08)",
+                        color: active ? "#fff" : past ? "rgba(255,255,255,0.42)" : "rgba(255,255,255,0.62)",
+                        transform: active ? "scale(1.03)" : "scale(1)",
+                        transition: "background 260ms ease, color 260ms ease, transform 260ms cubic-bezier(0.23,1,0.32,1)",
+                      }}
+                    >
+                      {s}
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="flex items-end gap-1 mb-4">
