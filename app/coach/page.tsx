@@ -229,11 +229,13 @@ export default function CoachPage() {
 
       if (claspX !== null && claspY !== null) {
         ctx.lineCap = "round";
-        for (const [s, e, wIdx] of ARMS) {
-          const sh = lm[s], el = lm[e], wr = lm[wIdx];
+        // Judge the geometry we draw: angle at the elbow between shoulder and clasp
+        const clasp = { x: claspX, y: claspY, z: 0, visibility: 1 };
+        for (const [s, e] of ARMS) {
+          const sh = lm[s], el = lm[e];
           if (!sh) continue;
-          const bent = el && wr ? angleBetween(sh, el, wr) < ELBOW_LOCK_DEG : false;
-          const color = bent ? "#ef4444" : "rgba(255,255,255,0.95)";
+          const bent = el ? angleBetween(sh, el, clasp) < ELBOW_LOCK_DEG : false;
+          const color = bent ? "#ef4444" : "#4ade80";
 
           ctx.strokeStyle = color;
           ctx.lineWidth = 6;
@@ -254,7 +256,7 @@ export default function CoachPage() {
           }
         }
         // Clasp vertex anchor
-        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.fillStyle = "#4ade80";
         ctx.beginPath();
         ctx.arc(x(claspX), y(claspY), 10, 0, Math.PI * 2);
         ctx.fill();
