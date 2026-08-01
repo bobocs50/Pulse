@@ -23,6 +23,7 @@ export interface DetectState {
   lastY: number;            // previous frame's signal (-1 = unseeded), for the jump guard
   lastSource: "hands" | "pose" | null; // signal source last frame — reset on switch
   lastPeakAt: number;       // ms timestamp of last accepted peak
+  peakTimes: number[];      // rolling last 4 peak timestamps for BPM
 }
 
 export function createDetectState(): DetectState {
@@ -36,6 +37,7 @@ export function createDetectState(): DetectState {
     lastY: -1,
     lastSource: null,
     lastPeakAt: 0,
+    peakTimes: [],
   };
 }
 
