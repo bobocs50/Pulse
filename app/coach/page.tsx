@@ -375,10 +375,12 @@ export default function CoachPage() {
         </span>
       </div>
 
-      {/* 4. Y-trace strip (peak-tuning interface — non-optional) */}
-      <div className="px-2 pb-4 safe-bottom">
-        <canvas ref={traceRef} width={390} height={80} className="w-full h-20 rounded-lg" />
-      </div>
+      {/* Y-trace removed from demo UI. drawYTrace no-ops without the canvas;
+          re-add this block to tune peak detection:
+          <div className="px-2 pb-4 safe-bottom">
+            <canvas ref={traceRef} width={390} height={80} className="w-full h-20 rounded-lg" />
+          </div> */}
+      <div className="pb-3 safe-bottom" />
     </div>
   );
 }
