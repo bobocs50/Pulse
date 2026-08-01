@@ -4,8 +4,20 @@
     {
       "name": "cpr-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 3000
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "-H",
+        "0.0.0.0",
+        "--experimental-https",
+        "--experimental-https-key",
+        "certificates/localhost-key.pem",
+        "--experimental-https-cert",
+        "certificates/localhost.pem"
+      ],
+      "port": 3000,
+      "url": "https://localhost:3000"
     }
   ]
 }
