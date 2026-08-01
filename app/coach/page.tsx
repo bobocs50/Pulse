@@ -52,7 +52,10 @@ export default function CoachPage() {
   const [metroOn, setMetroOn]   = useState(false);
   const [rounds, setRounds]     = useState(0);
   const [elapsed, setElapsed]   = useState(0);
+  const [toast, setToast]       = useState<string | null>(null);
   const sessionStartRef         = useRef<number | null>(null);
+  const toastClearRef           = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastToastAt             = useRef(0);
 
   // Pre-start setup overlay — 3-step tap-through gate before compressions start
   const [setupDone, setSetupDone] = useState(false);
@@ -244,8 +247,16 @@ export default function CoachPage() {
     if (isPeak) {
       if (sessionStartRef.current === null) sessionStartRef.current = now;
       navigator.vibrate?.(40);
-      playNow(COUNT_CUES[(next.compressCount - 1) % 30]); // spoken count on the peak
-      setCount(next.compressCount);
+      const c = next.compressCount;
+      // Only count out every 5th — less annoying than 1..30
+      if (c % 5 === 0) {
+        playNow(COUNT_CUES[(c - 1) % 30]);
+      } else if (c === 8) {
+        playNow("keepGoing");
+      } else if (c === 18) {
+        playNow("goodKeepThatPace");
+      }
+      setCount(c);
       if (next.cycleCount !== prev.cycleCount) setRounds(next.cycleCount);
     }
     if (next.phase !== prev.phase) setPhase(next.phase);
@@ -397,7 +408,16 @@ export default function CoachPage() {
 
     const { left, right } = bentRef.current;
     if (left || right) {
-      playCorrection(left && right ? "straightenArms" : left ? "straightenLeftArm" : "straightenRightArm");
+      const msg = left && right ? "Straighten your arms" : left ? "Straighten left arm" : "Straighten right arm";
+      const cue = left && right ? "straightenArms" : left ? "straightenLeftArm" : "straightenRightArm";
+      playCorrection(cue);
+      // Toast dedupe: don't restart the pill for a still-active same-side warning
+      if (now - lastToastAt.current > 2500 || toast !== msg) {
+        lastToastAt.current = now;
+        setToast(msg);
+        if (toastClearRef.current) clearTimeout(toastClearRef.current);
+        toastClearRef.current = setTimeout(() => setToast(null), 2500);
+      }
     }
   }
 
@@ -422,6 +442,16 @@ export default function CoachPage() {
           transition: height 80ms ease-out;
           will-change: height;
         }
+        @keyframes toastIn {
+          from { opacity: 0; transform: translate(-50%, -8px) scale(0.95); }
+          to   { opacity: 1; transform: translate(-50%,  0)   scale(1);    }
+        }
+        @keyframes countPop {
+          0%   { transform: scale(1.18); }
+          100% { transform: scale(1);    }
+        }
+        .count-pop { animation: countPop 180ms cubic-bezier(0.23,1,0.32,1); }
+        .phase-dot { transition: background-color 250ms ease; }
         .pb-safe { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
         @keyframes slideUp {
           from { opacity: 0; transform: translateY(16px); }
@@ -538,6 +568,22 @@ export default function CoachPage() {
             </div>
           )}
 
+          {/* Warning toast — amber pill, top center */}
+          {toast && (
+            <div
+              className="absolute top-3 left-1/2 z-20 flex items-center gap-2 rounded-full px-3.5 py-1.5 text-white text-sm font-semibold"
+              style={{
+                transform: "translateX(-50%)",
+                background: "rgba(217, 119, 6, 0.95)",
+                boxShadow: "0 6px 20px rgba(180, 83, 9, 0.35)",
+                animation: "toastIn 180ms cubic-bezier(0.16,1,0.3,1)",
+              }}
+            >
+              <span aria-hidden style={{ fontSize: 15, lineHeight: 1 }}>⚠</span>
+              {toast}
+            </div>
+          )}
+
           {/* Flip — top right */}
           <button
             onClick={flip}
@@ -583,13 +629,13 @@ export default function CoachPage() {
               >
                 {/* Phase indicator */}
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <div className={`w-[7px] h-[7px] rounded-full ${PHASE_DOT[phase]}`} />
+                  <div className={`phase-dot w-[7px] h-[7px] rounded-full ${PHASE_DOT[phase]}`} />
                   <span className="text-[9px] font-bold tracking-widest text-zinc-500 uppercase">{PHASE_LABEL[phase]}</span>
                 </div>
 
-                {/* Count — dominant */}
+                {/* Count — dominant, pops on each compression */}
                 <div className="flex items-baseline gap-[3px]">
-                  <span className="text-[2.6rem] font-black tabular-nums leading-none tracking-tight text-zinc-900">{count}</span>
+                  <span key={count} className="count-pop text-[2.6rem] font-black tabular-nums leading-none tracking-tight text-zinc-900">{count}</span>
                   <span className="text-sm font-bold text-zinc-300 leading-none">/30</span>
                 </div>
 
@@ -627,8 +673,11 @@ export default function CoachPage() {
               className="w-[4.5rem] h-[4.5rem] rounded-full focus:outline-none flex items-center justify-center gap-[5px]"
               style={{
                 background: "radial-gradient(ellipse at 38% 30%, #F9AE72 0%, #E86B47 32%, #C44728 62%, #8C2410 100%)",
-                animation: "blobRest 3s ease-in-out infinite",
-                boxShadow: "0 4px 16px rgba(200,70,40,0.22)",
+                animation: metroOn ? "blobTalk 0.54s ease-in-out infinite" : "blobRest 3s ease-in-out infinite",
+                boxShadow: metroOn
+                  ? "0 0 32px rgba(232,107,71,0.55), 0 0 10px rgba(200,70,40,0.35)"
+                  : "0 4px 16px rgba(200,70,40,0.22)",
+                transition: "box-shadow 300ms ease",
               }}
             >
               {/* Heights start flat (3px). The audio rAF loop drives them via barContainer. */}
