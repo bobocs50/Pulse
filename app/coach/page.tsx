@@ -186,10 +186,7 @@ export default function CoachPage() {
       setCount(next.compressCount);
       setBpm(currentBpm(detectRef.current));
     }
-    if (next.phase !== prev.phase) {
-      if (next.phase === "STALLED") playNow("keepGoing");
-      setPhase(next.phase);
-    }
+    if (next.phase !== prev.phase) setPhase(next.phase);
   }
 
   function drawOverlay() {

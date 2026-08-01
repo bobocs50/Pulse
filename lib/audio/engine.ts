@@ -52,16 +52,24 @@ export async function preloadAll(): Promise<void> {
 let lastCorrectionAt = 0;
 const CORRECTION_MIN_GAP_MS = 5 * (60000 / 110); // every 5 compressions
 
+// Single voice channel: a new cue stops the previous one — never two voices at once.
+// (Metronome clicks are a separate rhythm layer, unaffected.)
+let voiceSrc: AudioBufferSourceNode | null = null;
+
 export function playNow(name: string): void {
   const buf = buffers.get(name);
   if (!buf || !ctx) return;
+  try { voiceSrc?.stop(); } catch {}
   const src = ctx.createBufferSource();
   src.buffer = buf;
   src.connect(ctx.destination);
+  src.onended = () => { if (voiceSrc === src) voiceSrc = null; };
   src.start();
+  voiceSrc = src;
 }
 
 export function playCorrection(name: string): void {
+  if (voiceSrc) return; // never talk over a count — wait for a free slot
   const now = performance.now();
   if (now - lastCorrectionAt < CORRECTION_MIN_GAP_MS) return;
   lastCorrectionAt = now;

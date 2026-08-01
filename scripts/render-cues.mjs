@@ -20,7 +20,7 @@ function loadKey() {
 }
 
 const KEY = loadKey();
-const VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"; // Rachel
+const VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "EXAVITQu4vr4xnSDxMaL"; // Sarah (premade, works on free tier)
 const MODEL = process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5";
 
 // cue name (must match lib/audio/cues.ts) → spoken text
@@ -46,7 +46,7 @@ const TEXTS = {
   "slow-down":          "Slow down a little.",
   "a-little-faster":    "A little faster.",
   "move-hands-centre":  "Move your hands to the centre of the chest.",
-  "keep-going":         "Keep going, don't stop!",
+  "keep-going":         "Keep going.",
   "good-keep-that-pace":"Good. Keep that pace.",
   "cant-see-you":       "I can't see you. Step into view.",
 };
@@ -66,7 +66,8 @@ for (const [file, text] of Object.entries(TEXTS)) {
       body: JSON.stringify({
         text,
         model_id: MODEL,
-        voice_settings: { stability: 0.5, similarity_boost: 0.75, speed: 1.1 },
+        // calm, even delivery — high stability stops the shouty read
+        voice_settings: { stability: 0.85, similarity_boost: 0.75, speed: 1.0 },
       }),
     },
   );
