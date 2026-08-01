@@ -149,29 +149,20 @@ after 5 cycles (~2 min) → SWAP_PROMPT (fires once, non-blocking)
 
 ---
 
-## Screen 4: AED Guidance (AED phase)
-Triggered when rescuer taps "AED has arrived" button, or voice command.
-Tier 2: voice-guided, no computer vision required.
+## Screen 4: AED Transition (AED phase)
+Triggered when rescuer taps "AED has arrived" button during the coaching loop.
+This is a handoff screen — not an AED usage guide. The AED device itself instructs the rescuer from this point.
 
-**Sequence:**
-1. "Stop CPR. Turn on the AED — press the green button or open the lid."
-2. Static image: torso diagram showing two pad positions
-   - Pad 1: right side of chest, below collarbone
-   - Pad 2: left side, below armpit and left nipple
-3. "Attach the first pad here." (highlight Pad 1 on diagram)
-4. "Attach the second pad here." (highlight Pad 2 on diagram)
-5. "Plug in the connector if there is one."
-6. "Make sure nobody is touching the patient. Stand clear."
-7. "Let the AED analyse the heart rhythm. Do not touch the patient."
-8. If shock advised: "The AED will shock. Stand clear. Press the shock button if it asks you to."
-9. After shock (or if no shock advised): "Resume CPR immediately. Start compressions."
-10. → Transitions back to coaching screen, COMPRESS phase restarts
+**What it does:**
+- Stops the metronome and count immediately
+- Plays: "Stop compressions. The AED will take over — follow its instructions."
+- Displays one clear message: "Follow the AED voice instructions."
+- "Resume CPR" button visible at all times — tapping it returns to the COMPRESS phase instantly
 
-**AED screen elements:**
-- Large pad-placement diagram (simple illustration, clear on a phone screen from 1m)
-- Current instruction text in large type
-- "Next" button to advance manually if audio is not heard
-- "Back to CPR" button if AED was a false alarm
+**What it does not do:**
+- Does not walk through pad placement (the AED device does this with its own voice)
+- Does not instruct on shocking (the AED device handles this)
+- Does not replace AED guidance — gets out of the way and lets the device speak
 
 ---
 

@@ -98,12 +98,12 @@ Total: 4 hours. Pitch starts at 3:45. Hard stop.
 - [ ] `too_low` → `playCorrection("move-hands-centre")`
 - [ ] `unclear` → silence
 
-### 3:10–3:20 — AED guidance screen
+### 3:10–3:20 — AED transition screen
 - [ ] "AED has arrived" button on coaching screen
-- [ ] AED screen: static torso diagram with pad positions (Pad 1: right below collarbone, Pad 2: left below armpit)
-- [ ] Sequence of pre-rendered voice cues advancing step by step
-- [ ] "Next" button to advance manually
-- [ ] "Back to CPR" button → COMPRESS phase restarts
+- [ ] Stops metronome and count immediately
+- [ ] Plays: "Stop compressions. The AED will take over — follow its instructions."
+- [ ] Screen shows: "Follow the AED voice instructions."
+- [ ] "Resume CPR" button → COMPRESS phase restarts instantly
 
 ### 3:20–3:25 — Demo mode (insurance)
 - [ ] Record a clean landmark JSON stream (good take, good score) → save to `public/demo-landmarks.json`
