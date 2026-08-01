@@ -32,4 +32,4 @@ export interface WorkerOutMessage {
 
 export type CameraStatus = "loading" | "ready" | "blocked" | "error";
 
-export type CameraFeedback = { message: string; type: "warning" | "info" | "success" } | null;
+export type CameraFeedback = { message: string; type: "warning" | "info" | "success"; cue: string } | null;

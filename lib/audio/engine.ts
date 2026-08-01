@@ -78,16 +78,30 @@ const CORRECTION_MIN_GAP_MS = 5 * (60000 / 110); // every 5 compressions
 // (Metronome clicks are a separate rhythm layer, unaffected.)
 let voiceSrc: AudioBufferSourceNode | null = null;
 
-export function playNow(name: string): void {
+export function playNow(name: string, onEnded?: () => void): void {
   const buf = buffers.get(name);
-  if (!buf || !ctx) return;
+  if (!buf || !ctx) { onEnded?.(); return; }
   try { voiceSrc?.stop(); } catch {}
   const src = ctx.createBufferSource();
   src.buffer = buf;
-  src.connect(getAnalyser()); // routes through analyser → destination
-  src.onended = () => { if (voiceSrc === src) voiceSrc = null; };
+  src.connect(getAnalyser());
+  src.onended = () => {
+    // If a newer cue replaced us, voiceSrc has moved on — we were interrupted, so
+    // don't run the callback (it would resume a sequence the interruption cancelled).
+    if (voiceSrc !== src) return;
+    voiceSrc = null;
+    onEnded?.();
+  };
   src.start();
   voiceSrc = src;
+}
+
+// Chain cues back-to-back on the single voice channel. Each waits for the previous
+// to end, so the breath prompt never talks over itself.
+export function playSequence(names: string[]): void {
+  if (names.length === 0) return;
+  const [head, ...rest] = names;
+  playNow(head, () => playSequence(rest));
 }
 
 export function playCorrection(name: string): void {

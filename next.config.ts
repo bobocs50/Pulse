@@ -4,6 +4,7 @@ import type { NextConfig } from "next";
 // certs in ./certificates automatically. (httpsKeyFile/httpsCertFile are not
 // valid Next config options and broke the build.)
 const nextConfig: NextConfig = {
+  reactStrictMode: false,
   allowedDevOrigins: ["*.trycloudflare.com", "10.6.67.108", "10.6.67.129"],
 };
 

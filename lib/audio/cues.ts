@@ -38,19 +38,24 @@ export const CUE: Record<string, string> = {
   click: "/audio/click.mp3",
 
   // Setup — step 0: camera placement
-  // "Place your phone in front of you so I can clearly see your shoulders and hands."
   placePhone: "/audio/place-phone.mp3",
 
-  // Setup — step 1: technique briefing
-  // "Lock your elbows straight. Push hard and deep — keep up with every beat. Don't stop."
-  keepUpWithBeats: "/audio/keep-up-with-beats.mp3",
+  // Breath phase — played in this order at compression 30
+  stopCompressions:   "/audio/stop-compressions.mp3",
+  tiltAndPinch:       "/audio/tilt-and-pinch.mp3",
+  twoBreaths:         "/audio/two-breaths.mp3",
+  watchForRise:       "/audio/watch-for-rise.mp3",
+  letItRise:          "/audio/let-it-rise.mp3",
+  resumeCompressions: "/audio/resume-compressions.mp3",
+  swapIfYouCan:       "/audio/swap-if-you-can.mp3",
 
-  // Setup — step 2: ready gate
-  // "Are you ready to start?"
-  areYouReady: "/audio/are-you-ready.mp3",
-
-  // Out-of-frame warning (already rendered)
-  cantSeeYou: "/audio/cant-see-you.mp3",
+  // Framing corrections — one per camera-feedback message
+  cantSeeYou:    "/audio/cant-see-you.mp3",
+  turnToCamera:  "/audio/turn-to-camera.mp3",
+  tooClose:      "/audio/too-close.mp3",
+  tooFar:        "/audio/too-far.mp3",
+  handsInView:   "/audio/hands-in-view.mp3",
+  moveToCentre:  "/audio/move-to-centre.mp3",
 
   // Legacy position cues
   moveHandsCentre: "/audio/move-hands-centre.mp3",

@@ -1,48 +1,33 @@
-// Adapted from Rehabify camera-feedback.ts
-// Front-view checks: demo position faces the camera (standing at a table)
+// Framing check for the CPR position: phone on the floor, rescuer kneeling over the
+// chest. Hips and legs are out of frame almost always — only shoulders, arms and
+// hands matter, so nothing here may require the lower body.
 import type { Landmark, CameraFeedback } from "@/types/vision";
 import { LM } from "./geometry";
 
+// Shoulder separation in normalised frame units — the only usable distance proxy
+// when the rest of the body is cropped.
+const SPAN_TOO_CLOSE = 0.55;
+const SPAN_TOO_FAR   = 0.10;
+
 export function getCameraFeedback(lm: Landmark[]): CameraFeedback {
-  if (!lm || lm.length === 0) return { message: "No person detected", type: "warning" };
+  if (!lm || lm.length === 0) return { message: "Can't see you — step into view", type: "warning", cue: "cantSeeYou" };
 
   const vis = (l: Landmark) => (l?.visibility ?? 0) > 0.6;
 
-  let minX = 1, maxX = 0, minY = 1, maxY = 0, hasAny = false;
-  lm.forEach(l => {
-    if (vis(l)) {
-      hasAny = true;
-      minX = Math.min(minX, l.x); maxX = Math.max(maxX, l.x);
-      minY = Math.min(minY, l.y); maxY = Math.max(maxY, l.y);
-    }
-  });
-  if (!hasAny) return { message: "No person detected", type: "warning" };
-
-  const h = maxY - minY, w = maxX - minX;
-  const maxDim = Math.max(h, w);
-
-  const headOk = vis(lm[LM.nose]) || (vis(lm[LM.leftShoulder]) && vis(lm[LM.rightShoulder]));
-  const hipsOk = vis(lm[LM.leftHip]) || vis(lm[LM.rightHip]);
-
-  if (headOk && !hipsOk) return { message: "Move back — can't see body", type: "warning" };
-  if (!hipsOk)           return { message: "Can't see body", type: "warning" };
-  if (!headOk)           return { message: "Can't see head", type: "warning" };
-  if (maxDim < 0.35)     return { message: "Too far — move closer", type: "warning" };
-
-  const m = 0.02;
-  if (lm[LM.nose]?.y < m)  return { message: "Too close to top", type: "warning" };
-  if (h > 0.9)              return { message: "Too close — move back", type: "warning" };
-  if (lm.some(l => vis(l) && l.x < m)) return { message: "Too close to edge", type: "warning" };
-  if (lm.some(l => vis(l) && l.x > 1 - m)) return { message: "Too close to edge", type: "warning" };
-
-  // Front view: shoulders square to the camera, hands trackable, roughly centred
   const lsh = lm[LM.leftShoulder];
   const rsh = lm[LM.rightShoulder];
-  if (!vis(lsh) || !vis(rsh)) return { message: "Face the camera", type: "warning" };
+  if (!vis(lsh) && !vis(rsh)) return { message: "Can't see you — step into view", type: "warning", cue: "cantSeeYou" };
+  if (!vis(lsh) || !vis(rsh)) return { message: "Turn towards the camera", type: "warning", cue: "turnToCamera" };
+
+  const span = Math.hypot(lsh.x - rsh.x, lsh.y - rsh.y);
+  if (span > SPAN_TOO_CLOSE) return { message: "Too close — move the phone back", type: "warning", cue: "tooClose" };
+  if (span < SPAN_TOO_FAR)   return { message: "Too far — move closer", type: "warning", cue: "tooFar" };
+
   if (!vis(lm[LM.leftWrist]) && !vis(lm[LM.rightWrist]))
-    return { message: "Keep your hands in view", type: "warning" };
+    return { message: "Keep your hands in view", type: "warning", cue: "handsInView" };
+
   const cx = (lsh.x + rsh.x) / 2;
-  if (cx < 0.2 || cx > 0.8) return { message: "Step to the centre", type: "warning" };
+  if (cx < 0.12 || cx > 0.88) return { message: "Move to the centre", type: "warning", cue: "moveToCentre" };
 
   return null;
 }

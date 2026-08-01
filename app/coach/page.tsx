@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useCamera } from "@/lib/pose/useCamera";
 import { usePose } from "@/lib/pose/usePose";
 import { LM } from "@/lib/vision/geometry";
+import { getCameraFeedback } from "@/lib/vision/camera-feedback";
 
 // Elbow flare detection — lateral offset of elbow from shoulder→clasp line.
 // More robust than angle under compression lean foreshortening.
@@ -11,7 +12,7 @@ const FLARE_CLEAR = 0.10; // recovers to green below this
 import { createDetectState, detectPeak, TRACE_LEN } from "@/lib/coach/detect";
 import { createSessionState, transition } from "@/lib/coach/state";
 import type { Phase } from "@/lib/coach/state";
-import { ensureRunning, loadBuffer, startMetronome, stopMetronome, preloadAll, playNow, playCorrection, getFrequencyData } from "@/lib/audio/engine";
+import { ensureRunning, loadBuffer, startMetronome, stopMetronome, preloadAll, playNow, playSequence, playCorrection, getFrequencyData } from "@/lib/audio/engine";
 import { COUNT_CUES } from "@/lib/audio/cues";
 
 // Long side of frames sent to worker, aspect PRESERVED. Rehabify (reference)
@@ -53,6 +54,8 @@ export default function CoachPage() {
   const [rounds, setRounds]     = useState(0);
   const [elapsed, setElapsed]   = useState(0);
   const [toast, setToast]       = useState<string | null>(null);
+  const [breathLeft, setBreathLeft] = useState(0);
+  const breathEndsAtRef         = useRef<number | null>(null);
   const sessionStartRef         = useRef<number | null>(null);
   const toastClearRef           = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastToastAt             = useRef(0);
@@ -65,17 +68,52 @@ export default function CoachPage() {
   const setupStartedRef           = useRef(false);
   const setupDoneRef              = useRef(false);
   const setupStepRef              = useRef(0);
-  const lastCantSeeAt             = useRef(0);
+  const inFrameSinceRef           = useRef<number | null>(null);
+  const [cameraMsg, setCameraMsg] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState(3);
+  const countdownTimers           = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const pendingCueRef             = useRef<string | null>(null);
 
-  useEffect(() => () => stopMetronome(), []);
+  // Every spoken line on this screen is a pre-rendered ElevenLabs cue — the setup
+  // lines used browser speechSynthesis, which is a completely different voice from
+  // the counts and corrections and made the coach sound like two people.
+  // onDone must fire even when the audio never does. We reach /coach by router push
+  // with no tap on this screen, so the AudioContext can still be suspended — then
+  // src.start() schedules silently and onended NEVER fires. Anything chained off a
+  // cue (opening the mic) would hang forever waiting on a sound nobody heard.
+  function playCue(name: string, onDone?: () => void) {
+    let fired = false;
+    const done = () => { if (fired || !onDone) return; fired = true; onDone(); };
+    if (onDone) setTimeout(done, 4000);
+    ensureRunning()
+      .then(() => loadBuffer(name))
+      .then(() => playNow(name, done))
+      .catch(done);
+  }
 
-  // Voice: decode all cues up front; unlock audio on the first tap anywhere (iOS)
+  useEffect(() => () => {
+    stopMetronome();
+    countdownTimers.current.forEach(clearTimeout);
+  }, []);
+
+  // Unlock Web Audio on first tap (iOS requirement). We usually arrive from /talk in
+  // the same document with the context already running, so this is only a safety net.
   useEffect(() => {
     preloadAll().catch(() => {});
-    const unlock = () => { ensureRunning(); };
+    const unlock = () => {
+      ensureRunning().then(() => {
+        // The placement line is the first thing said; replay it if it was swallowed
+        // because the context was still suspended when the camera came up.
+        if (pendingCueRef.current) {
+          const queued = pendingCueRef.current;
+          pendingCueRef.current = null;
+          playCue(queued);
+        }
+      });
+    };
     window.addEventListener("pointerdown", unlock, { once: true });
     return () => window.removeEventListener("pointerdown", unlock);
-  }, []);
+  }, []); // eslint-disable-line
 
   // Read victim age from URL once on mount
   useEffect(() => {
@@ -83,21 +121,33 @@ export default function CoachPage() {
     if (a === "child" || a === "infant") setVictimAge(a);
   }, []);
 
-  // Setup: play step 0 audio when camera becomes ready; user taps through the rest
+  // Setup: placement instruction when camera is ready
   useEffect(() => {
     if (status !== "ready" || setupStartedRef.current) return;
     setupStartedRef.current = true;
-    ensureRunning().then(() => playNow("placePhone"));
-  }, [status]); // eslint-disable-line
+    pendingCueRef.current = "placePhone";
+    playCue("placePhone", () => { pendingCueRef.current = null; });
+  }, [status]);
 
-  function advanceSetup(step: number) {
-    setupStepRef.current = step;
-    setSetupStep(step);
-    if (step === 1) ensureRunning().then(() => playNow("keepUpWithBeats"));
-    if (step === 2) ensureRunning().then(() => playNow("areYouReady"));
+  // Timers, not cue callbacks: the countdown has to keep running even when the
+  // AudioContext is still suspended and nothing is actually audible.
+  function advanceSetup() {
+    if (setupStepRef.current !== 0) return;
+    setupStepRef.current = 1;
+    setSetupStep(1);
+    setCountdown(3);
+    playCue("three");
+    countdownTimers.current = [
+      setTimeout(() => { setCountdown(2); playCue("two"); }, 800),
+      setTimeout(() => { setCountdown(1); playCue("one"); }, 1600),
+      setTimeout(finishSetup, 2400),
+    ];
   }
 
   function finishSetup() {
+    if (setupDoneRef.current) return;
+    countdownTimers.current.forEach(clearTimeout);
+    countdownTimers.current = [];
     setupDoneRef.current = true;
     setSetupDone(true);
     ensureRunning().then(() => { startMetronome(); setMetroOn(true); });
@@ -231,6 +281,11 @@ export default function CoachPage() {
   }, [status, sendFrame]); // eslint-disable-line
 
   function runDetection() {
+    // Nothing counts until the user says "ready". Setup movement is still movement —
+    // without this gate the state machine banks compressions and starts the clock
+    // while the card is still on screen.
+    if (!setupDoneRef.current) return;
+
     const lm = landmarksRef.current;
     const hands = handsRef.current;
     const now = performance.now();
@@ -248,18 +303,48 @@ export default function CoachPage() {
       if (sessionStartRef.current === null) sessionStartRef.current = now;
       navigator.vibrate?.(40);
       const c = next.compressCount;
-      // Only count out every 5th — less annoying than 1..30
-      if (c % 5 === 0) {
-        playNow(COUNT_CUES[(c - 1) % 30]);
+      // On compression 20 the breath prompt starts on this same frame, and both share
+      // the single voice channel — speaking "twenty" here just gets cut off mid-word.
+      const entersBreaths = next.phase === "BREATHS" && prev.phase !== "BREATHS";
+      // Only count out every 5th — less annoying than 1..20
+      if (entersBreaths) {
+        // breath sequence below does the talking
+      } else if (c % 5 === 0) {
+        playNow(COUNT_CUES[(c - 1) % 20]);
       } else if (c === 8) {
         playNow("keepGoing");
-      } else if (c === 18) {
+      } else if (c === 14) {
         playNow("goodKeepThatPace");
       }
       setCount(c);
       if (next.cycleCount !== prev.cycleCount) setRounds(next.cycleCount);
     }
+
+    // Breath phase edges — metronome must stop before the prompt, restart after it
+    if (prev.phase !== "BREATHS" && next.phase === "BREATHS") {
+      stopMetronome();
+      setMetroOn(false);
+      setCount(20);
+      breathEndsAtRef.current = now + 10000;
+      setBreathLeft(10);
+      playSequence(["stopCompressions", "tiltAndPinch", "twoBreaths", "watchForRise"]);
+    } else if (prev.phase === "BREATHS" && next.phase !== "BREATHS") {
+      breathEndsAtRef.current = null;
+      setBreathLeft(0);
+      setCount(next.compressCount);
+      playNow("resumeCompressions");
+      ensureRunning().then(() => { startMetronome(); setMetroOn(true); });
+    }
+
     if (next.phase !== prev.phase) setPhase(next.phase);
+  }
+
+  // Backdate the window so the next TICK exits through the normal path — the metronome
+  // restart and resume cue live in one place, in runDetection's phase-edge handler.
+  function resumeFromBreaths() {
+    const s = sessionRef.current;
+    if (s.phase !== "BREATHS") return;
+    sessionRef.current = { ...s, breathStartedAt: performance.now() - 11000 };
   }
 
   function drawOverlay() {
@@ -396,18 +481,34 @@ export default function CoachPage() {
       setElapsed(Math.floor((now - sessionStartRef.current) / 1000));
     }
 
-    // Track whether body is visible — shown on setup step 0
+    // Track whether the frame is actually good enough to start — not just "shoulders
+    // exist". The checkmark must mean the same thing the advance gate means, or the
+    // card claims it can see you while silently refusing to advance.
     const lm = landmarksRef.current;
     const visible = !!(lm && lm.length >= 17 && lm[11] && lm[12]);
-    setInFrame(visible);
-    // Speak "I can't see you" once every 4s while out of frame on step 0
-    if (!setupDoneRef.current && setupStepRef.current === 0 && !visible && now - lastCantSeeAt.current > 4000) {
-      lastCantSeeAt.current = now;
-      playNow("cantSeeYou");
+    const feedback = lm?.length ? getCameraFeedback(lm) : null;
+    setInFrame(visible && feedback === null);
+
+    if (!setupDoneRef.current && setupStepRef.current === 0) {
+      setCameraMsg(feedback?.message ?? null);
+      if (visible && feedback === null) {
+        // Only count hold time when position is actually good (no feedback warnings)
+        if (inFrameSinceRef.current === null) inFrameSinceRef.current = now;
+        else if (now - inFrameSinceRef.current > 900) advanceSetup();
+      } else {
+        inFrameSinceRef.current = null;
+        // Framing problems are shown, not spoken — the banner is already on screen and
+        // a voice line on top of it just talks over the setup cue.
+      }
     }
 
+    if (breathEndsAtRef.current !== null) {
+      setBreathLeft(Math.max(0, Math.ceil((breathEndsAtRef.current - now) / 1000)));
+    }
+
+    // Never stack an arm correction on top of the breath prompt
     const { left, right } = bentRef.current;
-    if (left || right) {
+    if (setupDoneRef.current && sessionRef.current.phase !== "BREATHS" && (left || right)) {
       const msg = left && right ? "Straighten your arms" : left ? "Straighten left arm" : "Straighten right arm";
       const cue = left && right ? "straightenArms" : left ? "straightenLeftArm" : "straightenRightArm";
       playCorrection(cue);
@@ -458,6 +559,10 @@ export default function CoachPage() {
           to   { opacity: 1; transform: translateY(0); }
         }
         .slide-up { animation: slideUp 280ms cubic-bezier(0.23,1,0.32,1) both; }
+        @keyframes fillBar {
+          from { width: 0%; }
+          to   { width: 100%; }
+        }
       `}</style>
 
       {/* ---- Main panel ---- */}
@@ -478,25 +583,27 @@ export default function CoachPage() {
             style={facing === "user" ? { transform: "scaleX(-1)" } : undefined}
           />
 
-          {/* Setup overlay — gates the session until user taps "Start CPR" */}
+          {/* Setup overlay — hands-free: hold the framing, then a 3-2-1 countdown
+              starts on its own. Tapping during the countdown just skips ahead. */}
           {!setupDone && status === "ready" && (
-            <div className="absolute inset-0 z-20 flex flex-col justify-end pointer-events-none">
+            <div
+              className="absolute inset-0 z-20 flex flex-col justify-end"
+              onClick={() => { if (setupStepRef.current === 1) finishSetup(); }}
+            >
               {/* Gradient scrim so card reads over camera */}
               <div
                 className="absolute inset-x-0 bottom-0 h-2/3"
                 style={{ background: "linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%)" }}
               />
 
-              {/* Out-of-frame warning — step 0 only */}
-              {setupStep === 0 && !inFrame && (
+              {/* Camera feedback banner — step 0 only */}
+              {setupStep === 0 && cameraMsg && (
                 <div
-                  className="absolute top-4 inset-x-4 flex items-center gap-2 rounded-2xl px-4 py-3 pointer-events-auto"
+                  className="absolute top-4 inset-x-4 flex items-center gap-2 rounded-2xl px-4 py-3 pointer-events-none"
                   style={{ background: "rgba(217,119,6,0.92)", backdropFilter: "blur(12px)" }}
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
-                  <span className="text-white text-sm font-semibold leading-tight">
-                    Move back — I can't see your shoulders
-                  </span>
+                  <span className="text-white text-sm font-semibold leading-tight">{cameraMsg}</span>
                 </div>
               )}
 
@@ -512,59 +619,82 @@ export default function CoachPage() {
               >
                 {setupStep === 0 && (
                   <>
-                    <p className="text-[10px] font-bold tracking-widest text-[#E86B47] uppercase mb-1">Step 1 of 3 · Position</p>
-                    <p className="text-2xl font-black text-zinc-900 leading-tight mb-1">Get in frame</p>
-                    <p className="text-[13px] text-zinc-500 leading-snug mb-4">
-                      Prop your phone so your shoulders and clasped hands are clearly visible. Kneel beside the person.
+                    <p className="text-[10px] font-bold tracking-widest text-[#E86B47] uppercase mb-1">
+                      {inFrame ? "Hold still…" : "Getting ready"}
                     </p>
-                    <button
-                      onClick={() => advanceSetup(1)}
-                      className="w-full py-[14px] rounded-2xl bg-zinc-900 text-white text-base font-bold"
-                      style={{ letterSpacing: "0.01em" }}
-                    >
-                      I'm in position →
-                    </button>
+                    <p className="text-2xl font-black text-zinc-900 leading-tight mb-1">
+                      {inFrame ? "I can see you ✓" : "Get in frame"}
+                    </p>
+                    <p className="text-[13px] text-zinc-500 leading-snug">
+                      {inFrame
+                        ? "Hold still…"
+                        : "Phone down. Shoulders and hands in view."}
+                    </p>
+                    {inFrame && (
+                      <div
+                        className="mt-4 h-1.5 rounded-full overflow-hidden"
+                        style={{ background: "rgba(0,0,0,0.08)" }}
+                      >
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            background: "#4ade80",
+                            animation: "fillBar 0.9s linear forwards",
+                          }}
+                        />
+                      </div>
+                    )}
                   </>
                 )}
 
                 {setupStep === 1 && (
-                  <>
-                    <p className="text-[10px] font-bold tracking-widest text-[#E86B47] uppercase mb-1">Step 2 of 3 · Technique</p>
-                    <p className="text-2xl font-black text-zinc-900 leading-tight mb-1">Push hard, keep the beat</p>
-                    <p className="text-[13px] text-zinc-500 leading-snug mb-4">
-                      Lock your elbows straight. Push hard enough to move their chest — and keep up with every click of the metronome. Don't slow down.
-                    </p>
-                    <button
-                      onClick={() => advanceSetup(2)}
-                      className="w-full py-[14px] rounded-2xl bg-zinc-900 text-white text-base font-bold"
-                      style={{ letterSpacing: "0.01em" }}
+                  <div className="flex items-center gap-4">
+                    <span
+                      key={countdown}
+                      className="count-pop text-[3.4rem] font-black tabular-nums leading-none text-[#E86B47] shrink-0"
                     >
-                      Got it →
-                    </button>
-                  </>
-                )}
-
-                {setupStep === 2 && (
-                  <>
-                    <p className="text-[10px] font-bold tracking-widest text-[#E86B47] uppercase mb-1">Step 3 of 3 · Ready?</p>
-                    <p className="text-2xl font-black text-zinc-900 leading-tight mb-1">Let's go</p>
-                    <p className="text-[13px] text-zinc-500 leading-snug mb-4">
-                      The metronome starts when you tap. Push on every beat — don't stop.
-                    </p>
-                    <button
-                      onClick={finishSetup}
-                      className="w-full py-[16px] rounded-2xl text-white text-lg font-black"
-                      style={{
-                        background: "radial-gradient(ellipse at 38% 30%, #F9AE72 0%, #E86B47 32%, #C44728 62%, #8C2410 100%)",
-                        boxShadow: "0 4px 20px rgba(200,70,40,0.35)",
-                        letterSpacing: "0.01em",
-                      }}
-                    >
-                      Yes — Start CPR
-                    </button>
-                  </>
+                      {countdown}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold tracking-widest text-[#E86B47] uppercase mb-1">I can see you ✓</p>
+                      <p className="text-2xl font-black text-zinc-900 leading-tight mb-1">Starting now</p>
+                      <p className="text-[13px] text-zinc-500 leading-snug">
+                        Hands on the chest. Push on every beat.
+                      </p>
+                    </div>
+                  </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Breath phase — full-bleed, readable from 1m */}
+          {phase === "BREATHS" && (
+            <div
+              className="absolute inset-0 z-20 flex flex-col items-center justify-center px-6 text-center"
+              style={{ background: "rgba(8,20,32,0.88)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }}
+              onClick={resumeFromBreaths}
+            >
+              <p className="text-[11px] font-bold tracking-[0.2em] text-sky-300 uppercase mb-3">Stop compressions</p>
+              <p className="text-[2.4rem] font-black text-white leading-[1.05] mb-5">Two breaths</p>
+
+              <div className="flex flex-col gap-2 mb-7 w-full max-w-[300px]">
+                {["Tilt the head back", "Pinch the nose", "Breathe until the chest rises"].map(s => (
+                  <div key={s} className="rounded-xl px-4 py-2.5 text-white/90 text-[15px] font-semibold"
+                    style={{ background: "rgba(255,255,255,0.10)" }}>
+                    {s}
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-end gap-1 mb-4">
+                <span className="text-[3.2rem] font-black tabular-nums text-sky-300 leading-none">{breathLeft}</span>
+                <span className="text-base font-bold text-white/40 leading-none mb-1.5">s</span>
+              </div>
+
+              {/* No button: the countdown resumes on its own. Tapping is the shortcut —
+                  pushing is not, or the movement of giving breaths would resume it. */}
+              <p className="text-[13px] text-white/45">Resuming on its own — tap to go now</p>
             </div>
           )}
 
@@ -584,10 +714,10 @@ export default function CoachPage() {
             </div>
           )}
 
-          {/* Flip — top right */}
+          {/* Flip — top right. Above the setup overlay, which swallows taps now. */}
           <button
             onClick={flip}
-            className="absolute top-3 right-3 z-10 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5 text-white/90 text-xs font-semibold"
+            className="absolute top-3 right-3 z-30 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5 text-white/90 text-xs font-semibold"
             style={{ transition: "transform 150ms cubic-bezier(0.23,1,0.32,1)" }}
             onPointerDown={e => (e.currentTarget.style.transform = "scale(0.94)")}
             onPointerUp={e => (e.currentTarget.style.transform = "")}
@@ -607,13 +737,13 @@ export default function CoachPage() {
             </div>
           )}
 
-          {/* Stats HUD — frosted pill overlaid on bottom of camera */}
-          {(() => {
+          {/* Stats HUD — appears the moment setup ends, same beat as the metronome */}
+          {setupDone && (() => {
             const PHASE_DOT: Record<Phase, string> = {
-              IDLE: "bg-zinc-400", COMPRESS: "bg-emerald-400", STALLED: "bg-amber-400",
+              IDLE: "bg-zinc-400", COMPRESS: "bg-emerald-400", BREATHS: "bg-sky-400", STALLED: "bg-amber-400",
             };
             const PHASE_LABEL: Record<Phase, string> = {
-              IDLE: "READY", COMPRESS: "PUSH", STALLED: "DON'T STOP",
+              IDLE: "READY", COMPRESS: "PUSH", BREATHS: "BREATHS", STALLED: "DON'T STOP",
             };
             const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
             const ss = String(elapsed % 60).padStart(2, "0");
@@ -636,7 +766,7 @@ export default function CoachPage() {
                 {/* Count — dominant, pops on each compression */}
                 <div className="flex items-baseline gap-[3px]">
                   <span key={count} className="count-pop text-[2.6rem] font-black tabular-nums leading-none tracking-tight text-zinc-900">{count}</span>
-                  <span className="text-sm font-bold text-zinc-300 leading-none">/30</span>
+                  <span className="text-sm font-bold text-zinc-300 leading-none">/20</span>
                 </div>
 
                 <div className="flex-1" />

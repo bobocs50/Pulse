@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ConversationProvider,
@@ -77,76 +77,32 @@ function PlacementCard({ age }: { age: Age }) {
     infant: { label: "Infant", hands: "Two fingers",             depth: "⅓ chest diameter", rate: "15 : 2", detail: "Index and middle finger just below the nipple line." },
   }[age];
 
-  // Sketch-style hand SVGs matching the reference illustration
   const HandSVG = () => {
+    // brightness clips the PNGs' off-white backdrop to pure white so it disappears into the card.
     if (age === "adult") return (
-      <svg viewBox="0 0 160 200" width="160" height="200" fill="none" xmlns="http://www.w3.org/2000/svg">
-        {/* Back hand (lower, slightly offset) */}
-        <g opacity="0.45" stroke="#3f3f46" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M48 170 L48 148 Q48 142 54 142 Q60 142 60 148 L60 160"/>
-          <path d="M60 160 L60 136 Q60 130 66 130 Q72 130 72 136 L72 160"/>
-          <path d="M72 160 L72 134 Q72 128 78 128 Q84 128 84 134 L84 160"/>
-          <path d="M84 160 L84 138 Q84 132 90 132 Q96 132 96 138 L96 160"/>
-          <path d="M96 155 Q100 148 105 148 Q110 148 110 155 L108 168"/>
-          <path d="M46 170 Q46 176 60 178 Q82 182 108 172 L108 168 Q82 174 60 172 Q48 170 48 170 Z"/>
-        </g>
-        {/* Front hand (upper, main) */}
-        <g stroke="#1a1a1a" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-          {/* Thumb */}
-          <path d="M38 156 Q34 148 36 138 Q38 128 46 128 Q54 128 54 138 L54 152"/>
-          {/* Index */}
-          <path d="M54 152 L54 118 Q54 110 62 110 Q70 110 70 118 L70 152"/>
-          {/* Middle */}
-          <path d="M70 152 L70 112 Q70 104 78 104 Q86 104 86 112 L86 152"/>
-          {/* Ring */}
-          <path d="M86 152 L86 116 Q86 108 94 108 Q102 108 102 116 L102 152"/>
-          {/* Pinky */}
-          <path d="M102 152 L102 122 Q102 114 110 114 Q118 114 118 122 L116 152"/>
-          {/* Palm base */}
-          <path d="M36 158 Q36 168 54 172 Q86 178 116 168 L116 152 Q102 160 78 162 Q52 162 38 156 Z"/>
-        </g>
-        {/* Down arrow */}
-        <g stroke="#E86B47" strokeWidth="2.5" strokeLinecap="round">
-          <line x1="78" y1="184" x2="78" y2="196"/>
-          <polyline points="72,190 78,196 84,190"/>
-        </g>
-      </svg>
+      <img
+        src="/hand1.png"
+        alt="Both hands interlocked"
+        style={{ width: 176, height: 176, objectFit: "contain", filter: "brightness(1.08)" }}
+      />
     );
     if (age === "child") return (
-      <svg viewBox="0 0 160 200" width="160" height="200" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <g stroke="#1a1a1a" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-          {/* Thumb */}
-          <path d="M44 158 Q38 148 40 136 Q42 126 52 126 Q60 126 60 136 L60 152"/>
-          {/* Index */}
-          <path d="M60 152 L60 114 Q60 106 68 106 Q76 106 76 114 L76 152"/>
-          {/* Middle */}
-          <path d="M76 152 L76 108 Q76 100 84 100 Q92 100 92 108 L92 152"/>
-          {/* Ring */}
-          <path d="M92 152 L92 114 Q92 106 100 106 Q108 106 108 114 L108 152"/>
-          {/* Pinky */}
-          <path d="M108 152 L108 122 Q108 114 116 114 Q122 114 122 122 L120 152"/>
-          {/* Palm */}
-          <path d="M42 160 Q42 170 60 174 Q88 180 120 170 L120 152 Q104 162 82 164 Q56 164 44 158 Z"/>
-        </g>
-        <g stroke="#E86B47" strokeWidth="2.5" strokeLinecap="round">
-          <line x1="82" y1="182" x2="82" y2="196"/>
-          <polyline points="76,190 82,196 88,190"/>
-        </g>
-      </svg>
+      // hand2+ has "press down 2 inches" baked in under the drawing — window it out.
+      <div style={{ width: 176, height: 118, overflow: "hidden", position: "relative" }}>
+        <img
+          src="/hand2+.png"
+          alt="One hand, heel on center of chest"
+          style={{ width: 176, height: "auto", position: "absolute", top: -14, left: 0, filter: "brightness(1.08)" }}
+        />
+      </div>
     );
-    // infant — two fingers
     return (
       <svg viewBox="0 0 160 200" width="160" height="200" fill="none" xmlns="http://www.w3.org/2000/svg">
         <g stroke="#1a1a1a" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-          {/* Index finger */}
           <path d="M62 165 L62 108 Q62 100 70 100 Q78 100 78 108 L78 165"/>
-          {/* Middle finger */}
           <path d="M80 165 L80 106 Q80 98 88 98 Q96 98 96 106 L96 165"/>
-          {/* Folded ring + pinky hint */}
           <path d="M96 155 Q104 150 108 155 L106 165"/>
-          {/* Thumb tuck */}
           <path d="M62 152 Q54 148 50 154 L52 165"/>
-          {/* Palm base */}
           <path d="M50 167 Q50 176 70 178 Q88 180 108 172 L106 165 Q90 172 70 172 Q54 170 52 165 Z"/>
         </g>
         <g stroke="#E86B47" strokeWidth="2.5" strokeLinecap="round">
@@ -215,12 +171,98 @@ function TriageInner() {
     { id: "position",     label: "In position",               done: false },
   ]);
 
-  const { startSession, endSession } = useConversationControls();
+  const { startSession, endSession, sendContextualUpdate } = useConversationControls();
   const { status } = useConversationStatus();
   const { setMuted } = useConversationInput();
   const [muted, setMutedLocal] = useState(false);
   const [showPlacement, setShowPlacement] = useState(false);
   const ageRef = useRef<Age>("adult");
+  const sessionActive = useRef(false);
+  const endedByUs = useRef(false);
+  const retries = useRef(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [connError, setConnError] = useState<string | null>(null);
+  const [scopeStop, setScopeStop] = useState<string | null>(null);
+  const checksRef = useRef(checks);
+  checksRef.current = checks;
+  const reconnectRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    return () => {
+      endedByUs.current = true;
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+      if (sessionActive.current) {
+        sessionActive.current = false;
+        try { endSession(); } catch {}
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function stopSession() {
+    endedByUs.current = true;
+    sessionActive.current = false;
+    if (retryTimer.current) { clearTimeout(retryTimer.current); retryTimer.current = null; }
+    setReconnecting(false);
+    try { endSession(); } catch {}
+  }
+
+  // Drops are silent otherwise: provider startSession returns void, so a failed
+  // connect never rejects — it only surfaces through onError/onDisconnect.
+  function scheduleReconnect(reason: string, fatal = false) {
+    if (endedByUs.current || retryTimer.current) return;
+    sessionActive.current = false;
+    setConnError(fatal ? "Microphone blocked — allow mic access, then tap below." : reason);
+    if (fatal) { retries.current = 5; setReconnecting(false); return; }
+    console.warn("[Clara] connection lost:", reason, `(retry ${retries.current + 1}/5)`);
+    if (retries.current >= 5) { setReconnecting(false); return; }
+    const delay = Math.min(400 * 2 ** retries.current, 4000);
+    retries.current += 1;
+    setReconnecting(true);
+    retryTimer.current = setTimeout(() => {
+      retryTimer.current = null;
+      reconnectRef.current();
+    }, delay);
+  }
+
+  function connect(isRetry: boolean) {
+    if (!AGENT_ID) {
+      setConnError("NEXT_PUBLIC_ELEVENLABS_AGENT_ID is not set");
+      return;
+    }
+    endedByUs.current = false;
+    sessionActive.current = true;
+    startSession({
+      agentId: AGENT_ID,
+      connectionType: "websocket",
+      onConnect: ({ conversationId }) => {
+        console.log("[Clara] connected", conversationId);
+        retries.current = 0;
+        setReconnecting(false);
+        setConnError(null);
+        if (!isRetry) return;
+        const done = checksRef.current.filter(c => c.done).map(c => c.label);
+        try {
+          sendContextualUpdate(
+            `The connection dropped and just reconnected. Already confirmed: ${done.join(", ") || "nothing yet"}. Pick up from there — do not start over.`
+          );
+        } catch {}
+      },
+      onDisconnect: (d) => {
+        if (d.reason === "user" || endedByUs.current) return;
+        scheduleReconnect(d.reason === "error" ? d.message : "Clara ended the call");
+      },
+      onError: (msg, ctx) => {
+        console.error("[Clara] error:", msg, ctx);
+        const denied = ctx instanceof Error
+          ? ctx.name === "NotAllowedError" || ctx.name === "NotFoundError"
+          : /permission|denied/i.test(msg);
+        scheduleReconnect(msg, denied);
+      },
+    });
+  }
+  reconnectRef.current = () => connect(true);
 
   function toggleMute() {
     const next = !muted;
@@ -233,8 +275,9 @@ function TriageInner() {
   }
 
   useConversationClientTool("recordVictimStatus", (p) => {
-    if (p.responsive === false) tick("unresponsive");
-    if (p.breathing === false)  setTimeout(() => tick("breathing"), 380);
+    // The agent only reports breathing in Phase 2 — by then unresponsive is established.
+    if (p.responsive === false || p.breathing === false) tick("unresponsive");
+    if (p.breathing === false) setTimeout(() => tick("breathing"), 380);
     return "ok";
   });
   useConversationClientTool("recordVictimType", (p) => {
@@ -245,11 +288,19 @@ function TriageInner() {
     return "ok";
   });
   useConversationClientTool("recordAED", (_p) => { tick("aed"); return "ok"; });
-  useConversationClientTool("scopeStop", (_p) => { endSession(); return "ok"; });
+  useConversationClientTool("scopeStop", (p) => {
+    // Keep the mic open — Clara scope-stops on "unclear" too, and the user needs
+    // to be able to correct her without the screen going dead.
+    setScopeStop(typeof p.reason === "string" ? p.reason : "unclear");
+    return "ok";
+  });
   useConversationClientTool("start_compressions", () => {
     tick("position");
-    endSession();
-    setTimeout(() => router.push(`/coach?age=${ageRef.current}`), 400);
+    endedByUs.current = true;
+    setTimeout(() => {
+      stopSession();
+      router.push(`/coach?age=${ageRef.current}`);
+    }, 400);
     return "ok";
   });
 
@@ -287,10 +338,12 @@ function TriageInner() {
 
           <button
             className="tap-btn w-full py-5 rounded-2xl bg-zinc-900 text-white text-xl font-black text-center"
-            onClick={async () => {
+            onClick={() => {
+              if (sessionActive.current) return;
               tick("called");
               setCalled112(true);
-              if (AGENT_ID) await startSession({ agentId: AGENT_ID, connectionType: "websocket" });
+              retries.current = 0;
+              connect(false);
             }}
           >
             Done — continue
@@ -301,17 +354,18 @@ function TriageInner() {
   }
 
   // ── Blob + checklist ──
-  const isConnecting = status === "connecting";
   const isConnected  = status === "connected";
+  const isConnecting = !isConnected && (status === "connecting" || reconnecting);
+  const isDown       = !isConnected && !isConnecting;
 
   return (
     <main className="h-full w-full flex flex-col" style={{ background: "#F0EEE9", paddingTop: safeTop, paddingBottom: safeBot }}>
       <style>{STYLES}</style>
 
       {/* Back only before mic is live */}
-      {!isConnected && !isConnecting && (
+      {isDown && (
         <div className="px-5 mb-2">
-          <BackButton onClick={() => { endSession(); setCalled112(false); }} />
+          <BackButton onClick={() => { stopSession(); setCalled112(false); }} />
         </div>
       )}
 
@@ -346,9 +400,31 @@ function TriageInner() {
             className="text-sm font-semibold text-zinc-500 text-center"
             style={{ animation: "rowIn 200ms cubic-bezier(0.23,1,0.32,1) both" }}
           >
-            {isConnecting ? "Connecting…" : isConnected ? "Clara is speaking — answer out loud" : "Clara"}
+            {reconnecting ? "Reconnecting to Clara…" : isConnecting ? "Connecting…" : isConnected ? "Clara is speaking — answer out loud" : "Clara stopped listening"}
           </p>
+          {isDown && connError && (
+            <p className="text-xs text-zinc-400 text-center max-w-[280px] leading-snug -mt-1">{connError}</p>
+          )}
         </div>
+
+        {/* Scope stop — Clara handed off to the 112 dispatcher */}
+        {scopeStop && (
+          <div
+            className="row-in w-full max-w-sm mb-4 px-4 py-4 rounded-2xl"
+            style={{ background: "rgba(220,38,38,0.1)" }}
+          >
+            <p className="text-sm font-black text-red-700 mb-1">Stay on the line with 112</p>
+            <p className="text-xs text-red-700/80 leading-snug mb-3">
+              This is outside what Clara can coach ({scopeStop}). Follow the dispatcher&apos;s instructions.
+            </p>
+            <button
+              className="tap-btn text-xs font-bold text-red-700 underline"
+              onClick={() => setScopeStop(null)}
+            >
+              Clara misheard — keep going
+            </button>
+          </div>
+        )}
 
         {/* Checklist — hidden when placement illustration is showing */}
         {!showPlacement && (
@@ -387,8 +463,27 @@ function TriageInner() {
         {/* Big hand placement illustration — replaces checklist at position phase */}
         {showPlacement && <PlacementCard age={age} />}
 
-        {/* Mute */}
-        <button
+        {/* Escape hatches — only after auto-reconnect has given up */}
+        {isDown && (
+          <div className="mt-6 w-full max-w-sm flex flex-col gap-2">
+            <button
+              className="tap-btn w-full py-4 rounded-2xl text-lg font-black text-center"
+              style={{ background: "rgba(0,0,0,0.06)", color: "#3f3f46" }}
+              onClick={() => { retries.current = 0; setConnError(null); connect(true); }}
+            >
+              Talk to Clara again
+            </button>
+            <button
+              className="tap-btn w-full py-4 rounded-2xl bg-zinc-900 text-white text-lg font-black text-center"
+              onClick={() => { stopSession(); router.push(`/coach?age=${ageRef.current}`); }}
+            >
+              Start compressions →
+            </button>
+          </div>
+        )}
+
+        {/* Mute — only when connected */}
+        {isConnected && <button
           onClick={toggleMute}
           className="mute-btn mt-6 flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold"
           style={{
@@ -401,7 +496,7 @@ function TriageInner() {
           ) : (
             <><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.4 5-5.4 5-2.6 0-4.8-1.84-5.34-4.32L4.6 11A7.012 7.012 0 0011 17.93V21h2v-3.07A7.01 7.01 0 0019 11h-2z"/></svg>Mic on</>
           )}
-        </button>
+        </button>}
       </div>
     </main>
   );

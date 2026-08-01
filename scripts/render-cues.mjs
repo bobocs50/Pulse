@@ -49,6 +49,14 @@ const TEXTS = {
   "keep-going":         "Keep going.",
   "good-keep-that-pace":"Good. Keep that pace.",
   "cant-see-you":       "I can't see you. Step into view.",
+  // Setup — same voice as everything else. Never fall back to browser speechSynthesis.
+  "place-phone":        "Put the phone down where it can see your shoulders and hands.",
+  // Framing corrections — one per camera-feedback message
+  "turn-to-camera":     "Turn towards the camera.",
+  "too-close":          "Too close. Move the phone back.",
+  "too-far":            "Too far. Move a bit closer.",
+  "hands-in-view":      "Keep your hands in view.",
+  "move-to-centre":     "Move to the centre of the frame.",
 };
 
 mkdirSync(OUT, { recursive: true });
