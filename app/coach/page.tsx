@@ -2,31 +2,17 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useCamera } from "@/lib/pose/useCamera";
 import { usePose } from "@/lib/pose/usePose";
-import { getCameraFeedback } from "@/lib/vision/camera-feedback";
-import type { CameraFeedback } from "@/types/vision";
 import { LM } from "@/lib/vision/geometry";
 
-// Arm-straightness = elbow's lateral offset from the shoulder→clasp line,
-// as a fraction of that line's length. Elbow angles (2D and 3D) both
-// collapse under foreshortening in the compression lean — lateral flare
-// doesn't. Measured: straight ~0.06-0.07, flared ~0.17. Hysteresis band:
-const FLARE_TRIP  = 0.13; // go red above
-const FLARE_CLEAR = 0.10; // back to green below
-import { createDetectState, detectPeak, currentBpm, TRACE_LEN } from "@/lib/coach/detect";
+// Elbow flare detection — lateral offset of elbow from shoulder→clasp line.
+// More robust than angle under compression lean foreshortening.
+const FLARE_TRIP  = 0.13; // goes red above this
+const FLARE_CLEAR = 0.10; // recovers to green below this
+import { createDetectState, detectPeak, TRACE_LEN } from "@/lib/coach/detect";
 import { createSessionState, transition } from "@/lib/coach/state";
 import type { Phase } from "@/lib/coach/state";
-import { ensureRunning, loadBuffer, startMetronome, stopMetronome, setOnBeat, getAudioContext, preloadAll, playNow, playCorrection } from "@/lib/audio/engine";
+import { ensureRunning, loadBuffer, startMetronome, stopMetronome, preloadAll, playNow, playCorrection } from "@/lib/audio/engine";
 import { COUNT_CUES } from "@/lib/audio/cues";
-
-const INSTRUCTIONS: Record<Phase, { step: string; title: string; hint: string }> = {
-  IDLE:          { step: "STEP 1", title: "Get ready",          hint: "Stand over the pillow · clasp hands · lock elbows" },
-  SETUP:         { step: "STEP 1", title: "Get ready",          hint: "Stand over the pillow · clasp hands · lock elbows" },
-  COMPRESS:      { step: "STEP 2", title: "Push hard & fast",   hint: "Follow the beat — let it rise fully between pushes" },
-  STALLED:       { step: "KEEP GOING", title: "Don't stop!",    hint: "Keep pushing — hard and fast" },
-  BREATH_PROMPT: { step: "STEP 3", title: "Give 2 breaths",     hint: "Tilt the head back, lift the chin" },
-  BREATH_WINDOW: { step: "STEP 3", title: "Give 2 breaths",     hint: "Tilt the head back, lift the chin" },
-  CHECK_RISE:    { step: "STEP 3", title: "Watch the chest",    hint: "Then straight back on the chest" },
-};
 
 // Long side of frames sent to worker, aspect PRESERVED. Rehabify (reference)
 // feeds full-res video — MediaPipe crops landmark ROIs from the input frame,
@@ -58,28 +44,21 @@ export default function CoachPage() {
   const offscreen  = useRef<OffscreenCanvas | null>(null);
   const rafRef     = useRef<number>(0);
 
-  const [feedback, setFeedback] = useState<CameraFeedback>(null);
-  const [score, setScore]       = useState<number | null>(null);
   const [count, setCount]       = useState(0);
-  const [bpm, setBpm]           = useState<number | null>(null);
   const [phase, setPhase]       = useState<Phase>("IDLE");
   const [metroOn, setMetroOn]   = useState(false);
-  const [beatCount, setBeatCount] = useState(0); // 1..30, manual metronome
   const [rounds, setRounds]     = useState(0);
-  const [elapsed, setElapsed]   = useState(0); // seconds since first compression
-  const sessionStartRef         = useRef<number | null>(null); // ms timestamp of first peak
+  const [elapsed, setElapsed]   = useState(0);
+  const sessionStartRef         = useRef<number | null>(null);
 
+  // Pre-start setup overlay
+  const [setupDone, setSetupDone] = useState(false);
+  const [setupStep, setSetupStep] = useState(0);
+  const [victimAge, setVictimAge] = useState<"adult" | "child" | "infant">("adult");
+  const setupStartedRef           = useRef(false);
+  const setupTimersRef            = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  // Manual metronome: beat callback drives the count display; cleanup stops audio
-  useEffect(() => {
-    setOnBeat(b => {
-      setBeatCount((b % 30) + 1);
-    });
-    return () => {
-      setOnBeat(null);
-      stopMetronome();
-    };
-  }, []);
+  useEffect(() => () => stopMetronome(), []);
 
   // Voice: decode all cues up front; unlock audio on the first tap anywhere (iOS)
   useEffect(() => {
@@ -88,6 +67,30 @@ export default function CoachPage() {
     window.addEventListener("pointerdown", unlock, { once: true });
     return () => window.removeEventListener("pointerdown", unlock);
   }, []);
+
+  // Read victim age from URL once on mount
+  useEffect(() => {
+    const a = new URLSearchParams(window.location.search).get("age");
+    if (a === "child" || a === "infant") setVictimAge(a);
+  }, []);
+
+  // Setup sequence: fires once when camera becomes ready
+  useEffect(() => {
+    if (status !== "ready" || setupStartedRef.current) return;
+    setupStartedRef.current = true;
+    setSetupStep(0); playNow("moveHandsCentre");
+    const t1 = setTimeout(() => { setSetupStep(1); playNow("shouldersOver"); }, 3000);
+    const t2 = setTimeout(() => { setSetupStep(2); playNow("straightenArms"); }, 5500);
+    const t3 = setTimeout(() => { setSetupDone(true); }, 8000);
+    setupTimersRef.current = [t1, t2, t3];
+    return () => setupTimersRef.current.forEach(clearTimeout);
+  }, [status]); // eslint-disable-line
+
+  function finishSetup() {
+    setupTimersRef.current.forEach(clearTimeout);
+    setSetupDone(true);
+    ensureRunning().then(() => { startMetronome(); setMetroOn(true); });
+  }
 
   async function toggleMetronome() {
     if (metroOn) {
@@ -148,7 +151,6 @@ export default function CoachPage() {
       sendFrame();
       runDetection();
       drawOverlay();
-      drawYTrace();
       updateStateThrottled();
     };
 
@@ -191,7 +193,6 @@ export default function CoachPage() {
       navigator.vibrate?.(40);
       playNow(COUNT_CUES[(next.compressCount - 1) % 30]); // spoken count on the peak
       setCount(next.compressCount);
-      setBpm(currentBpm(detectRef.current));
       if (next.cycleCount !== prev.cycleCount) setRounds(next.cycleCount);
     }
     if (next.phase !== prev.phase) setPhase(next.phase);
@@ -322,49 +323,6 @@ export default function CoachPage() {
     }
   }
 
-  // Dual-line trace: wrist signal (green, drives detection) + shoulder (dim, fallback).
-  // Auto-scaled to the window so small normalized motion stays readable while tuning.
-  function drawYTrace() {
-    const canvas = traceRef.current;
-    if (!canvas) return;
-    const st = detectRef.current;
-    if (st.wristTrace.length < 2) return;
-    const W = canvas.width, H = canvas.height;
-    const ctx = canvas.getContext("2d")!;
-
-    ctx.fillStyle = "rgba(0,0,0,0.85)";
-    ctx.fillRect(0, 0, W, H);
-
-    let lo = Infinity, hi = -Infinity;
-    for (const v of st.wristTrace)    { if (v < lo) lo = v; if (v > hi) hi = v; }
-    for (const v of st.shoulderTrace) { if (v < lo) lo = v; if (v > hi) hi = v; }
-    const pad = (hi - lo) * 0.1 || 0.005;
-    lo -= pad; hi += pad;
-
-    const px = (i: number) => (i / (TRACE_LEN - 1)) * W;
-    const py = (v: number) => ((v - lo) / (hi - lo)) * H;
-
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    st.shoulderTrace.forEach((v, i) => (i === 0 ? ctx.moveTo(px(i), py(v)) : ctx.lineTo(px(i), py(v))));
-    ctx.stroke();
-
-    ctx.strokeStyle = "#22c55e";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    st.wristTrace.forEach((v, i) => (i === 0 ? ctx.moveTo(px(i), py(v)) : ctx.lineTo(px(i), py(v))));
-    ctx.stroke();
-
-    ctx.fillStyle = "#f59e0b";
-    st.peakFlags.forEach((f, i) => {
-      if (!f) return;
-      ctx.beginPath();
-      ctx.arc(px(i), py(st.wristTrace[i]), 3, 0, Math.PI * 2);
-      ctx.fill();
-    });
-  }
-
   function updateStateThrottled() {
     const now = performance.now();
     if (now - lastStateUpdate.current < 100) return; // ~10fps
@@ -374,22 +332,10 @@ export default function CoachPage() {
       setElapsed(Math.floor((now - sessionStartRef.current) / 1000));
     }
 
-    const lm = landmarksRef.current;
     const { left, right } = bentRef.current;
-    // Spoken correction, self-throttled by playCorrection's minimum gap
     if (left || right) {
       playCorrection(left && right ? "straightenArms" : left ? "straightenLeftArm" : "straightenRightArm");
     }
-    // Posture correction outranks framing nags; hands tracked = framing is fine
-    setFeedback(
-      left && right ? { message: "Fix your posture — straighten your arms", type: "warning" }
-        : left  ? { message: "Straighten your left arm", type: "warning" }
-        : right ? { message: "Straighten your right arm", type: "warning" }
-        : handsRef.current?.length ? null
-        : lm ? getCameraFeedback(lm)
-        : { message: "No person detected", type: "warning" }
-    );
-    // TODO: wire real score from score.ts
   }
 
   return (
@@ -451,15 +397,6 @@ export default function CoachPage() {
             Flip
           </button>
 
-          {/* Feedback toast — top center, inset from flip button */}
-          {feedback && (
-            <div className="absolute top-3 left-3 right-16 z-10 flex justify-center pointer-events-none">
-              <div className="bg-amber-200/95 backdrop-blur-sm rounded-full px-4 py-2">
-                <p className="text-amber-950 font-semibold text-xs">{feedback.message}</p>
-              </div>
-            </div>
-          )}
-
           {status === "loading" && (
             <div className="absolute inset-0 flex items-center justify-center bg-zinc-900 z-20">
               <p className="text-zinc-400 text-lg">Starting camera…</p>
@@ -471,17 +408,13 @@ export default function CoachPage() {
             </div>
           )}
 
-          {/* Stats HUD — frosted pill overlaid on bottom of camera, all edges rounded */}
+          {/* Stats HUD — frosted pill overlaid on bottom of camera */}
           {(() => {
             const PHASE_DOT: Record<Phase, string> = {
-              IDLE: "bg-zinc-400", SETUP: "bg-zinc-400",
-              COMPRESS: "bg-emerald-400", STALLED: "bg-amber-400",
-              BREATH_PROMPT: "bg-sky-400", BREATH_WINDOW: "bg-sky-400", CHECK_RISE: "bg-sky-400",
+              IDLE: "bg-zinc-400", COMPRESS: "bg-emerald-400", STALLED: "bg-amber-400",
             };
             const PHASE_LABEL: Record<Phase, string> = {
-              IDLE: "READY", SETUP: "READY",
-              COMPRESS: "PUSH", STALLED: "DON'T STOP",
-              BREATH_PROMPT: "BREATHE", BREATH_WINDOW: "BREATHE", CHECK_RISE: "WATCH",
+              IDLE: "READY", COMPRESS: "PUSH", STALLED: "DON'T STOP",
             };
             const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
             const ss = String(elapsed % 60).padStart(2, "0");
