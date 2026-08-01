@@ -9,7 +9,8 @@ import { ELBOW_LOCK_DEG } from "@/lib/coach/score";
 import { createDetectState, detectPeak, currentBpm, TRACE_LEN } from "@/lib/coach/detect";
 import { createSessionState, transition } from "@/lib/coach/state";
 import type { Phase } from "@/lib/coach/state";
-import { ensureRunning, loadBuffer, startMetronome, stopMetronome, setOnBeat, getAudioContext } from "@/lib/audio/engine";
+import { ensureRunning, loadBuffer, startMetronome, stopMetronome, setOnBeat, getAudioContext, preloadAll, playNow, playCorrection } from "@/lib/audio/engine";
+import { COUNT_CUES } from "@/lib/audio/cues";
 
 const INSTRUCTIONS: Record<Phase, { step: string; title: string; hint: string }> = {
   IDLE:          { step: "STEP 1", title: "Get ready",          hint: "Stand over the pillow · clasp hands · lock elbows" },
@@ -72,6 +73,14 @@ export default function CoachPage() {
       setOnBeat(null);
       stopMetronome();
     };
+  }, []);
+
+  // Voice: decode all cues up front; unlock audio on the first tap anywhere (iOS)
+  useEffect(() => {
+    preloadAll().catch(() => {});
+    const unlock = () => { ensureRunning(); };
+    window.addEventListener("pointerdown", unlock, { once: true });
+    return () => window.removeEventListener("pointerdown", unlock);
   }, []);
 
   async function toggleMetronome() {
@@ -173,10 +182,14 @@ export default function CoachPage() {
     // React state only on actual change (~2Hz on peaks, rare on phase flips)
     if (isPeak) {
       navigator.vibrate?.(40);
+      playNow(COUNT_CUES[(next.compressCount - 1) % 30]); // spoken count on the peak
       setCount(next.compressCount);
       setBpm(currentBpm(detectRef.current));
     }
-    if (next.phase !== prev.phase) setPhase(next.phase);
+    if (next.phase !== prev.phase) {
+      if (next.phase === "STALLED") playNow("keepGoing");
+      setPhase(next.phase);
+    }
   }
 
   function drawOverlay() {
@@ -333,6 +346,10 @@ export default function CoachPage() {
 
     const lm = landmarksRef.current;
     const { left, right } = bentRef.current;
+    // Spoken correction, self-throttled by playCorrection's minimum gap
+    if (left || right) {
+      playCorrection(left && right ? "straightenArms" : left ? "straightenLeftArm" : "straightenRightArm");
+    }
     // Posture correction outranks framing nags; hands tracked = framing is fine
     setFeedback(
       left && right ? { message: "Fix your posture — straighten your arms", type: "warning" }

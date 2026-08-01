@@ -48,6 +48,8 @@ export const CUE: Record<string, string> = {
 
   // Corrections (imperative, 2–5 words, name corrective action only)
   straightenArms:    "/audio/straighten-arms.mp3",
+  straightenLeftArm: "/audio/straighten-left-arm.mp3",
+  straightenRightArm:"/audio/straighten-right-arm.mp3",
   shouldersOver:     "/audio/shoulders-over.mp3",
   pushHarder:        "/audio/push-harder.mp3",
   letItRise:         "/audio/let-it-rise.mp3",
