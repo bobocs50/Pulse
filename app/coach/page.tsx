@@ -9,7 +9,7 @@ import { ELBOW_LOCK_DEG } from "@/lib/coach/score";
 import { createDetectState, detectPeak, currentBpm, TRACE_LEN } from "@/lib/coach/detect";
 import { createSessionState, transition } from "@/lib/coach/state";
 import type { Phase } from "@/lib/coach/state";
-import { ensureRunning, loadBuffer, startMetronome, stopMetronome, setOnBeat } from "@/lib/audio/engine";
+import { ensureRunning, loadBuffer, startMetronome, stopMetronome, setOnBeat, getAudioContext } from "@/lib/audio/engine";
 
 const INSTRUCTIONS: Record<Phase, { step: string; title: string; hint: string }> = {
   IDLE:          { step: "STEP 1", title: "Get ready",          hint: "Stand over the pillow · clasp hands · lock elbows" },
@@ -60,9 +60,14 @@ export default function CoachPage() {
   const [metroOn, setMetroOn]   = useState(false);
   const [beatCount, setBeatCount] = useState(0); // 1..30, manual metronome
 
+  const [audioState, setAudioState] = useState("idle");
+
   // Manual metronome: beat callback drives the count display; cleanup stops audio
   useEffect(() => {
-    setOnBeat(b => setBeatCount((b % 30) + 1));
+    setOnBeat(b => {
+      setBeatCount((b % 30) + 1);
+      setAudioState(getAudioContext().state);
+    });
     return () => {
       setOnBeat(null);
       stopMetronome();
@@ -76,6 +81,7 @@ export default function CoachPage() {
       return;
     }
     await ensureRunning(); // iOS: resume on every gesture path
+    setAudioState(getAudioContext().state);
     loadBuffer("click").catch(() => {}); // real click.mp3 if present, synth otherwise
     startMetronome();
     setMetroOn(true);
@@ -462,6 +468,7 @@ export default function CoachPage() {
         <p className="text-zinc-400 text-xs text-center max-w-xs">
           30 pushes, then 2 breaths. Counts loop automatically.
         </p>
+        <p className="text-zinc-300 text-[10px] tabular-nums">audio: {audioState} · beat {beatCount}</p>
       </div>
     </div>
   );
