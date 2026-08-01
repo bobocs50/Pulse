@@ -7,9 +7,10 @@ import type { CameraFeedback } from "@/types/vision";
 import { LM, angleBetween3D } from "@/lib/vision/geometry";
 
 // Elbow color thresholds on the SMOOTHED 3D angle, with hysteresis so the
-// V doesn't flicker at the boundary: red below 150°, back to green above 158°.
-const BEND_TRIP_DEG  = 150;
-const BEND_CLEAR_DEG = 158;
+// V doesn't flicker. Calibrated against real stances via the on-overlay
+// angle readout — the compression lean reads lower than intuition suggests.
+const BEND_TRIP_DEG  = 135;
+const BEND_CLEAR_DEG = 143;
 import { createDetectState, detectPeak, currentBpm, TRACE_LEN } from "@/lib/coach/detect";
 import { createSessionState, transition } from "@/lib/coach/state";
 import type { Phase } from "@/lib/coach/state";
@@ -279,6 +280,14 @@ export default function CoachPage() {
             ctx.beginPath();
             ctx.arc(x(el.x), y(el.y), 7, 0, Math.PI * 2);
             ctx.fill();
+            // Live angle readout — calibration aid, cheap to delete later
+            const label = `${Math.round(armAngleRef.current[key])}°`;
+            ctx.font = "700 26px system-ui";
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = "rgba(0,0,0,0.7)";
+            ctx.strokeText(label, x(el.x) + 16, y(el.y) - 12);
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText(label, x(el.x) + 16, y(el.y) - 12);
           }
         }
         // Clasp vertex anchor
