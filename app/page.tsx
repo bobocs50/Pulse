@@ -18,9 +18,9 @@ export default function Home() {
           and hands are in view. Then press Start.
         </p>
 
-        {/* Start button */}
+        {/* Start button → intake agent (talk screen has a skip straight to coach) */}
         <Link
-          href="/coach"
+          href="/talk"
           className="w-full py-5 rounded-2xl bg-rose-300 text-rose-950 text-2xl font-bold text-center active:scale-95 transition-transform shadow-sm"
         >
           Start
