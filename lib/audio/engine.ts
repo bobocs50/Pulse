@@ -73,15 +73,38 @@ let metronomeTick = 0;               // next beat index
 let metronomeNextAt = 0;             // AudioContext time of next beat
 let metronomeTimer: ReturnType<typeof setInterval> | null = null;
 
+// UI hook: fires (via setTimeout aligned to the scheduled beat) once per beat
+let onBeat: ((beat: number) => void) | null = null;
+export function setOnBeat(cb: ((beat: number) => void) | null): void {
+  onBeat = cb;
+}
+
 function scheduleTick() {
   if (!ctx) return;
   while (metronomeNextAt < ctx.currentTime + LOOKAHEAD_SEC) {
+    const t = metronomeNextAt;
     const buf = buffers.get("click");
     if (buf) {
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.connect(ctx.destination);
-      src.start(metronomeNextAt);
+      src.start(t);
+    } else {
+      // click.mp3 not rendered yet — synthesized tick keeps the metronome real
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 1000;
+      gain.gain.setValueAtTime(0.5, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.06);
+    }
+    if (onBeat) {
+      const beatIndex = metronomeTick;
+      const delayMs = Math.max(0, (t - ctx.currentTime) * 1000);
+      setTimeout(() => onBeat?.(beatIndex), delayMs);
     }
     metronomeTick++;
     metronomeNextAt += BEAT_SEC;
