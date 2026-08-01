@@ -25,6 +25,7 @@ export interface WorkerInMessage {
 export interface WorkerOutMessage {
   type: "ready" | "landmarks" | "error";
   landmarks?: Landmark[] | null;
+  hands?: Landmark[][] | null;   // HandLandmarker: 21 anchors per detected hand
   timestamp?: number;
   error?: string;
 }
