@@ -396,11 +396,6 @@ export default function CoachPage() {
             style={facing === "user" ? { transform: "scaleX(-1)" } : undefined}
           />
 
-          {/* Count badge */}
-          <div className="absolute top-3 left-3 bg-emerald-200 text-emerald-900 font-extrabold text-2xl tabular-nums rounded-xl px-3 py-1 z-10">
-            {count} / 30
-          </div>
-
           {/* Flip camera */}
           <button
             onClick={flip}
@@ -409,14 +404,22 @@ export default function CoachPage() {
             Flip
           </button>
 
-          {/* Camera feedback toast */}
+          {/* Camera feedback toast — top, count owns the bottom */}
           {feedback && (
-            <div className="absolute bottom-3 inset-x-3 z-10 flex justify-center pointer-events-none">
+            <div className="absolute top-3 inset-x-3 z-10 flex justify-center pointer-events-none">
               <div className="bg-amber-200/95 backdrop-blur-sm rounded-xl px-4 py-2">
                 <p className="text-amber-950 font-semibold text-sm">{feedback.message}</p>
               </div>
             </div>
           )}
+
+          {/* Count — huge, bottom, over a fading gradient so video stays visible */}
+          <div className="absolute bottom-0 inset-x-0 z-10 pointer-events-none bg-gradient-to-t from-black/70 via-black/25 to-transparent pt-16 pb-2 flex items-end justify-center">
+            <span className="text-white font-black text-[7rem] leading-none tabular-nums drop-shadow-lg">
+              {count}
+            </span>
+            <span className="text-white/70 font-bold text-3xl mb-3 ml-2">/ 30</span>
+          </div>
 
           {status === "loading" && (
             <div className="absolute inset-0 flex items-center justify-center bg-zinc-900 z-20">
