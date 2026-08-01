@@ -54,12 +54,15 @@ export default function CoachPage() {
   const [elapsed, setElapsed]   = useState(0);
   const sessionStartRef         = useRef<number | null>(null);
 
-  // Pre-start setup overlay
+  // Pre-start setup overlay — 3-step tap-through gate before compressions start
   const [setupDone, setSetupDone] = useState(false);
   const [setupStep, setSetupStep] = useState(0);
+  const [inFrame, setInFrame]     = useState(false);
   const [victimAge, setVictimAge] = useState<"adult" | "child" | "infant">("adult");
   const setupStartedRef           = useRef(false);
-  const setupTimersRef            = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const setupDoneRef              = useRef(false);
+  const setupStepRef              = useRef(0);
+  const lastCantSeeAt             = useRef(0);
 
   useEffect(() => () => stopMetronome(), []);
 
@@ -77,20 +80,22 @@ export default function CoachPage() {
     if (a === "child" || a === "infant") setVictimAge(a);
   }, []);
 
-  // Setup sequence: fires once when camera becomes ready
+  // Setup: play step 0 audio when camera becomes ready; user taps through the rest
   useEffect(() => {
     if (status !== "ready" || setupStartedRef.current) return;
     setupStartedRef.current = true;
-    setSetupStep(0); playNow("moveHandsCentre");
-    const t1 = setTimeout(() => { setSetupStep(1); playNow("shouldersOver"); }, 3000);
-    const t2 = setTimeout(() => { setSetupStep(2); playNow("straightenArms"); }, 5500);
-    const t3 = setTimeout(() => { setSetupDone(true); }, 8000);
-    setupTimersRef.current = [t1, t2, t3];
-    return () => setupTimersRef.current.forEach(clearTimeout);
+    ensureRunning().then(() => playNow("placePhone"));
   }, [status]); // eslint-disable-line
 
+  function advanceSetup(step: number) {
+    setupStepRef.current = step;
+    setSetupStep(step);
+    if (step === 1) ensureRunning().then(() => playNow("keepUpWithBeats"));
+    if (step === 2) ensureRunning().then(() => playNow("areYouReady"));
+  }
+
   function finishSetup() {
-    setupTimersRef.current.forEach(clearTimeout);
+    setupDoneRef.current = true;
     setSetupDone(true);
     ensureRunning().then(() => { startMetronome(); setMetroOn(true); });
   }
@@ -380,6 +385,16 @@ export default function CoachPage() {
       setElapsed(Math.floor((now - sessionStartRef.current) / 1000));
     }
 
+    // Track whether body is visible — shown on setup step 0
+    const lm = landmarksRef.current;
+    const visible = !!(lm && lm.length >= 17 && lm[11] && lm[12]);
+    setInFrame(visible);
+    // Speak "I can't see you" once every 4s while out of frame on step 0
+    if (!setupDoneRef.current && setupStepRef.current === 0 && !visible && now - lastCantSeeAt.current > 4000) {
+      lastCantSeeAt.current = now;
+      playNow("cantSeeYou");
+    }
+
     const { left, right } = bentRef.current;
     if (left || right) {
       playCorrection(left && right ? "straightenArms" : left ? "straightenLeftArm" : "straightenRightArm");
@@ -408,6 +423,11 @@ export default function CoachPage() {
           will-change: height;
         }
         .pb-safe { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(16px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .slide-up { animation: slideUp 280ms cubic-bezier(0.23,1,0.32,1) both; }
       `}</style>
 
       {/* ---- Main panel ---- */}
@@ -427,6 +447,96 @@ export default function CoachPage() {
             className="absolute inset-0 w-full h-full object-cover"
             style={facing === "user" ? { transform: "scaleX(-1)" } : undefined}
           />
+
+          {/* Setup overlay — gates the session until user taps "Start CPR" */}
+          {!setupDone && status === "ready" && (
+            <div className="absolute inset-0 z-20 flex flex-col justify-end pointer-events-none">
+              {/* Gradient scrim so card reads over camera */}
+              <div
+                className="absolute inset-x-0 bottom-0 h-2/3"
+                style={{ background: "linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%)" }}
+              />
+
+              {/* Out-of-frame warning — step 0 only */}
+              {setupStep === 0 && !inFrame && (
+                <div
+                  className="absolute top-4 inset-x-4 flex items-center gap-2 rounded-2xl px-4 py-3 pointer-events-auto"
+                  style={{ background: "rgba(217,119,6,0.92)", backdropFilter: "blur(12px)" }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+                  <span className="text-white text-sm font-semibold leading-tight">
+                    Move back — I can't see your shoulders
+                  </span>
+                </div>
+              )}
+
+              {/* Instruction card */}
+              <div
+                className="relative mx-3 mb-3 rounded-3xl px-5 pt-5 pb-5 pointer-events-auto"
+                style={{
+                  background: "rgba(240,238,233,0.96)",
+                  backdropFilter: "blur(20px)",
+                  WebkitBackdropFilter: "blur(20px)",
+                  boxShadow: "0 -4px 40px rgba(0,0,0,0.18), 0 2px 12px rgba(0,0,0,0.08)",
+                }}
+              >
+                {setupStep === 0 && (
+                  <>
+                    <p className="text-[10px] font-bold tracking-widest text-[#E86B47] uppercase mb-1">Step 1 of 3 · Position</p>
+                    <p className="text-2xl font-black text-zinc-900 leading-tight mb-1">Get in frame</p>
+                    <p className="text-[13px] text-zinc-500 leading-snug mb-4">
+                      Prop your phone so your shoulders and clasped hands are clearly visible. Kneel beside the person.
+                    </p>
+                    <button
+                      onClick={() => advanceSetup(1)}
+                      className="w-full py-[14px] rounded-2xl bg-zinc-900 text-white text-base font-bold"
+                      style={{ letterSpacing: "0.01em" }}
+                    >
+                      I'm in position →
+                    </button>
+                  </>
+                )}
+
+                {setupStep === 1 && (
+                  <>
+                    <p className="text-[10px] font-bold tracking-widest text-[#E86B47] uppercase mb-1">Step 2 of 3 · Technique</p>
+                    <p className="text-2xl font-black text-zinc-900 leading-tight mb-1">Push hard, keep the beat</p>
+                    <p className="text-[13px] text-zinc-500 leading-snug mb-4">
+                      Lock your elbows straight. Push hard enough to move their chest — and keep up with every click of the metronome. Don't slow down.
+                    </p>
+                    <button
+                      onClick={() => advanceSetup(2)}
+                      className="w-full py-[14px] rounded-2xl bg-zinc-900 text-white text-base font-bold"
+                      style={{ letterSpacing: "0.01em" }}
+                    >
+                      Got it →
+                    </button>
+                  </>
+                )}
+
+                {setupStep === 2 && (
+                  <>
+                    <p className="text-[10px] font-bold tracking-widest text-[#E86B47] uppercase mb-1">Step 3 of 3 · Ready?</p>
+                    <p className="text-2xl font-black text-zinc-900 leading-tight mb-1">Let's go</p>
+                    <p className="text-[13px] text-zinc-500 leading-snug mb-4">
+                      The metronome starts when you tap. Push on every beat — don't stop.
+                    </p>
+                    <button
+                      onClick={finishSetup}
+                      className="w-full py-[16px] rounded-2xl text-white text-lg font-black"
+                      style={{
+                        background: "radial-gradient(ellipse at 38% 30%, #F9AE72 0%, #E86B47 32%, #C44728 62%, #8C2410 100%)",
+                        boxShadow: "0 4px 20px rgba(200,70,40,0.35)",
+                        letterSpacing: "0.01em",
+                      }}
+                    >
+                      Yes — Start CPR
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Flip — top right */}
           <button

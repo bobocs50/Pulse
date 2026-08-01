@@ -37,7 +37,22 @@ export const CUE: Record<string, string> = {
   // Metronome tick
   click: "/audio/click.mp3",
 
-  // Setup sequence (fires once when camera becomes ready)
+  // Setup — step 0: camera placement
+  // "Place your phone in front of you so I can clearly see your shoulders and hands."
+  placePhone: "/audio/place-phone.mp3",
+
+  // Setup — step 1: technique briefing
+  // "Lock your elbows straight. Push hard and deep — keep up with every beat. Don't stop."
+  keepUpWithBeats: "/audio/keep-up-with-beats.mp3",
+
+  // Setup — step 2: ready gate
+  // "Are you ready to start?"
+  areYouReady: "/audio/are-you-ready.mp3",
+
+  // Out-of-frame warning (already rendered)
+  cantSeeYou: "/audio/cant-see-you.mp3",
+
+  // Legacy position cues
   moveHandsCentre: "/audio/move-hands-centre.mp3",
   shouldersOver:   "/audio/shoulders-over.mp3",
 
@@ -45,6 +60,13 @@ export const CUE: Record<string, string> = {
   straightenArms:    "/audio/straighten-arms.mp3",
   straightenLeftArm: "/audio/straighten-left-arm.mp3",
   straightenRightArm:"/audio/straighten-right-arm.mp3",
+
+  // Encouragement / pacing (interleaved between counts)
+  goodKeepThatPace: "/audio/good-keep-that-pace.mp3",
+  keepGoing:        "/audio/keep-going.mp3",
+  pushHarder:       "/audio/push-harder.mp3",
+  aLittleFaster:    "/audio/a-little-faster.mp3",
+  slowDown:         "/audio/slow-down.mp3",
 };
 
 export const COUNT_CUES = [
