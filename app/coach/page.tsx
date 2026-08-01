@@ -90,6 +90,7 @@ export default function CoachPage() {
   // Detection + session state live in refs — 30fps loop never touches React state
   const detectRef  = useRef(createDetectState());
   const sessionRef = useRef(createSessionState());
+  const bentRef    = useRef(false); // any arm bent this frame (set by drawOverlay)
 
   // Throttle ref for React state updates (~10fps)
   const lastStateUpdate = useRef(0);
@@ -231,10 +232,12 @@ export default function CoachPage() {
         ctx.lineCap = "round";
         // Judge the geometry we draw: angle at the elbow between shoulder and clasp
         const clasp = { x: claspX, y: claspY, z: 0, visibility: 1 };
+        let anyBent = false;
         for (const [s, e] of ARMS) {
           const sh = lm[s], el = lm[e];
           if (!sh) continue;
           const bent = el ? angleBetween(sh, el, clasp) < ELBOW_LOCK_DEG : false;
+          if (bent) anyBent = true;
           const color = bent ? "#ef4444" : "#4ade80";
 
           ctx.strokeStyle = color;
@@ -261,6 +264,9 @@ export default function CoachPage() {
         ctx.arc(x(claspX), y(claspY), 10, 0, Math.PI * 2);
         ctx.fill();
         refX = claspX;
+        bentRef.current = anyBent;
+      } else {
+        bentRef.current = false;
       }
     }
 
@@ -326,10 +332,10 @@ export default function CoachPage() {
     lastStateUpdate.current = now;
 
     const lm = landmarksRef.current;
-    // Hands tracked = signal is fine; suppress body-framing nags entirely
-    // (close stance keeps a partial pose that fails the completeness checks)
+    // Posture correction outranks framing nags; hands tracked = framing is fine
     setFeedback(
-      handsRef.current?.length ? null
+      bentRef.current ? { message: "Fix your posture — straighten your arms", type: "warning" }
+        : handsRef.current?.length ? null
         : lm ? getCameraFeedback(lm)
         : { message: "No person detected", type: "warning" }
     );
