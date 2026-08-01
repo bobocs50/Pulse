@@ -69,6 +69,7 @@ export default function CoachPage() {
   const setupDoneRef              = useRef(false);
   const setupStepRef              = useRef(0);
   const inFrameSinceRef           = useRef<number | null>(null);
+  const placementSpokenRef        = useRef(false);
   const [cameraMsg, setCameraMsg] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(3);
   const countdownTimers           = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -126,7 +127,7 @@ export default function CoachPage() {
     if (status !== "ready" || setupStartedRef.current) return;
     setupStartedRef.current = true;
     pendingCueRef.current = "placePhone";
-    playCue("placePhone", () => { pendingCueRef.current = null; });
+    playCue("placePhone", () => { pendingCueRef.current = null; placementSpokenRef.current = true; });
   }, [status]);
 
   // Timers, not cue callbacks: the countdown has to keep running even when the
@@ -281,10 +282,11 @@ export default function CoachPage() {
   }, [status, sendFrame]); // eslint-disable-line
 
   function runDetection() {
-    // Nothing counts until the user says "ready". Setup movement is still movement —
+    // Nothing counts until the countdown ends. Setup movement is still movement —
     // without this gate the state machine banks compressions and starts the clock
     // while the card is still on screen.
     if (!setupDoneRef.current) return;
+    if (sessionRef.current.phase === "DONE") return; // terminal — stop reading peaks
 
     const lm = landmarksRef.current;
     const hands = handsRef.current;
@@ -320,7 +322,7 @@ export default function CoachPage() {
       if (next.cycleCount !== prev.cycleCount) setRounds(next.cycleCount);
     }
 
-    // Breath phase edges — metronome must stop before the prompt, restart after it
+    // Breath phase edges — metronome must stop before the prompt
     if (prev.phase !== "BREATHS" && next.phase === "BREATHS") {
       stopMetronome();
       setMetroOn(false);
@@ -328,20 +330,19 @@ export default function CoachPage() {
       breathEndsAtRef.current = now + 10000;
       setBreathLeft(10);
       playSequence(["stopCompressions", "tiltAndPinch", "twoBreaths", "watchForRise"]);
-    } else if (prev.phase === "BREATHS" && next.phase !== "BREATHS") {
+    } else if (next.phase === "DONE" && prev.phase !== "DONE") {
       breathEndsAtRef.current = null;
       setBreathLeft(0);
-      setCount(next.compressCount);
-      playNow("resumeCompressions");
-      ensureRunning().then(() => { startMetronome(); setMetroOn(true); });
+      // Nothing is spoken here: the breath sequence is the last thing heard, and a
+      // closing line would land on top of its tail.
     }
 
     if (next.phase !== prev.phase) setPhase(next.phase);
   }
 
-  // Backdate the window so the next TICK exits through the normal path — the metronome
-  // restart and resume cue live in one place, in runDetection's phase-edge handler.
-  function resumeFromBreaths() {
+  // Backdate the window so the next TICK ends the round through the normal path —
+  // the phase-edge handler in runDetection stays the only place that reacts to it.
+  function endBreaths() {
     const s = sessionRef.current;
     if (s.phase !== "BREATHS") return;
     sessionRef.current = { ...s, breathStartedAt: performance.now() - 11000 };
@@ -477,7 +478,10 @@ export default function CoachPage() {
     if (now - lastStateUpdate.current < 100) return; // ~10fps
     lastStateUpdate.current = now;
 
-    if (sessionStartRef.current !== null) {
+    const phaseNow = sessionRef.current.phase;
+
+    // Clock freezes on the summary — it reports the round that was actually coached.
+    if (sessionStartRef.current !== null && phaseNow !== "DONE") {
       setElapsed(Math.floor((now - sessionStartRef.current) / 1000));
     }
 
@@ -492,9 +496,11 @@ export default function CoachPage() {
     if (!setupDoneRef.current && setupStepRef.current === 0) {
       setCameraMsg(feedback?.message ?? null);
       if (visible && feedback === null) {
-        // Only count hold time when position is actually good (no feedback warnings)
+        // Only count hold time when position is actually good (no feedback warnings).
+        // placementSpokenRef holds the countdown until the placement line has finished —
+        // two voices must never run together (playCue's 4s fallback guarantees it flips).
         if (inFrameSinceRef.current === null) inFrameSinceRef.current = now;
-        else if (now - inFrameSinceRef.current > 900) advanceSetup();
+        else if (now - inFrameSinceRef.current > 900 && placementSpokenRef.current) advanceSetup();
       } else {
         inFrameSinceRef.current = null;
         // Framing problems are shown, not spoken — the banner is already on screen and
@@ -506,9 +512,9 @@ export default function CoachPage() {
       setBreathLeft(Math.max(0, Math.ceil((breathEndsAtRef.current - now) / 1000)));
     }
 
-    // Never stack an arm correction on top of the breath prompt
+    // Never stack an arm correction on top of the breath prompt or the summary
     const { left, right } = bentRef.current;
-    if (setupDoneRef.current && sessionRef.current.phase !== "BREATHS" && (left || right)) {
+    if (setupDoneRef.current && phaseNow !== "BREATHS" && phaseNow !== "DONE" && (left || right)) {
       const msg = left && right ? "Straighten your arms" : left ? "Straighten left arm" : "Straighten right arm";
       const cue = left && right ? "straightenArms" : left ? "straightenLeftArm" : "straightenRightArm";
       playCorrection(cue);
@@ -559,6 +565,8 @@ export default function CoachPage() {
           to   { opacity: 1; transform: translateY(0); }
         }
         .slide-up { animation: slideUp 280ms cubic-bezier(0.23,1,0.32,1) both; }
+        .tap-btn { transition: transform 160ms cubic-bezier(0.23,1,0.32,1); }
+        .tap-btn:active { transform: scale(0.96); }
         @keyframes fillBar {
           from { width: 0%; }
           to   { width: 100%; }
@@ -673,7 +681,7 @@ export default function CoachPage() {
             <div
               className="absolute inset-0 z-20 flex flex-col items-center justify-center px-6 text-center"
               style={{ background: "rgba(8,20,32,0.88)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }}
-              onClick={resumeFromBreaths}
+              onClick={endBreaths}
             >
               <p className="text-[11px] font-bold tracking-[0.2em] text-sky-300 uppercase mb-3">Stop compressions</p>
               <p className="text-[2.4rem] font-black text-white leading-[1.05] mb-5">Two breaths</p>
@@ -692,9 +700,46 @@ export default function CoachPage() {
                 <span className="text-base font-bold text-white/40 leading-none mb-1.5">s</span>
               </div>
 
-              {/* No button: the countdown resumes on its own. Tapping is the shortcut —
-                  pushing is not, or the movement of giving breaths would resume it. */}
-              <p className="text-[13px] text-white/45">Resuming on its own — tap to go now</p>
+              {/* No button: the countdown ends the round on its own. Tapping is the
+                  shortcut — pushing is not, or giving breaths would trigger it. */}
+              <p className="text-[13px] text-white/45">Tap to finish now</p>
+            </div>
+          )}
+
+          {/* Demo end — one 20:2 round and stop. Real CPR does not stop here, and the
+              copy says so rather than letting the screen imply the job is finished. */}
+          {phase === "DONE" && (
+            <div
+              className="absolute inset-0 z-20 flex flex-col items-center justify-center px-6 text-center"
+              style={{ background: "rgba(8,20,32,0.9)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }}
+            >
+              <p className="text-[11px] font-bold tracking-[0.2em] text-emerald-300 uppercase mb-3 slide-up">Round complete</p>
+              <p className="text-[2.4rem] font-black text-white leading-[1.05] mb-6 slide-up">20 compressions,<br />2 breaths</p>
+
+              <div className="flex gap-3 mb-7 slide-up">
+                <div className="flex flex-col items-center px-6 py-3 rounded-2xl" style={{ background: "rgba(255,255,255,0.10)" }}>
+                  <span className="text-[9px] font-bold tracking-widest text-white/40 uppercase mb-1">Time</span>
+                  <span className="text-2xl font-black tabular-nums text-white leading-none">
+                    {`${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`}
+                  </span>
+                </div>
+                <div className="flex flex-col items-center px-6 py-3 rounded-2xl" style={{ background: "rgba(255,255,255,0.10)" }}>
+                  <span className="text-[9px] font-bold tracking-widest text-white/40 uppercase mb-1">Rounds</span>
+                  <span className="text-2xl font-black tabular-nums text-white leading-none">{rounds}</span>
+                </div>
+              </div>
+
+              <p className="text-[13px] text-white/55 leading-snug max-w-[290px] mb-7">
+                In a real arrest you would keep repeating this — 20 pushes, 2 breaths — until the ambulance takes over.
+              </p>
+
+              <button
+                onClick={() => window.location.reload()}
+                className="tap-btn px-7 py-3.5 rounded-2xl bg-white text-zinc-900 text-base font-black"
+                style={{ WebkitTapHighlightColor: "transparent" }}
+              >
+                Run it again
+              </button>
             </div>
           )}
 
@@ -740,10 +785,10 @@ export default function CoachPage() {
           {/* Stats HUD — appears the moment setup ends, same beat as the metronome */}
           {setupDone && (() => {
             const PHASE_DOT: Record<Phase, string> = {
-              IDLE: "bg-zinc-400", COMPRESS: "bg-emerald-400", BREATHS: "bg-sky-400", STALLED: "bg-amber-400",
+              IDLE: "bg-zinc-400", COMPRESS: "bg-emerald-400", BREATHS: "bg-sky-400", STALLED: "bg-amber-400", DONE: "bg-zinc-400",
             };
             const PHASE_LABEL: Record<Phase, string> = {
-              IDLE: "READY", COMPRESS: "PUSH", BREATHS: "BREATHS", STALLED: "DON'T STOP",
+              IDLE: "READY", COMPRESS: "PUSH", BREATHS: "BREATHS", STALLED: "DON'T STOP", DONE: "ROUND DONE",
             };
             const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
             const ss = String(elapsed % 60).padStart(2, "0");

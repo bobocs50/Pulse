@@ -27,6 +27,8 @@ export function transition(
   event: "PEAK" | "TICK",
   nowMs: number,
 ): SessionState {
+  if (state.phase === "DONE") return state;
+
   if (state.phase === "BREATHS") {
     const elapsed = nowMs - state.breathStartedAt;
     // Peaks are ignored on purpose. Leaning over to give breaths moves the shoulders,
@@ -34,11 +36,9 @@ export function transition(
     // then those same stray peaks counted to 20 again and replayed the whole prompt.
     // The only ways out are the timer below and the tap (which backdates breathStartedAt).
     if (elapsed > BREATH_MS) {
-      // Reset lastCompressAt too — otherwise the stall check sees the 10s-old
-      // compression 20 and flips to STALLED on the very next tick.
       return {
-        phase: "COMPRESS",
-        compressCount: 0,
+        phase: "DONE",
+        compressCount: 20,
         cycleCount: state.cycleCount,
         lastCompressAt: nowMs,
         breathStartedAt: 0,
