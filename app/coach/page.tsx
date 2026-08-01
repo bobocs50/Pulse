@@ -6,25 +6,17 @@ import { getCameraFeedback } from "@/lib/vision/camera-feedback";
 import type { CameraFeedback } from "@/types/vision";
 import { LM, angleBetween3D } from "@/lib/vision/geometry";
 
-// Elbow color thresholds on the SMOOTHED 3D angle, with hysteresis so the
-// V doesn't flicker at the boundary: red below 150°, back to green above 158°.
-const BEND_TRIP_DEG  = 150;
-const BEND_CLEAR_DEG = 158;
-import { createDetectState, detectPeak, currentBpm, TRACE_LEN } from "@/lib/coach/detect";
+// Elbow color thresholds on the SMOOTHED 3D angle, with hysteresis.
+// Loosened so arms only go red when clearly bent — noisy/occluded landmarks
+// were tripping the old 150° threshold too easily.
+const BEND_TRIP_DEG  = 140;   // goes red below this
+const BEND_CLEAR_DEG = 148;   // recovers to green above this
+const ELBOW_VIS_MIN  = 0.5;   // ignore elbow if MediaPipe isn't confident
+import { createDetectState, detectPeak, TRACE_LEN } from "@/lib/coach/detect";
 import { createSessionState, transition } from "@/lib/coach/state";
 import type { Phase } from "@/lib/coach/state";
-import { ensureRunning, loadBuffer, startMetronome, stopMetronome, setOnBeat, getAudioContext, preloadAll, playNow, playCorrection } from "@/lib/audio/engine";
+import { ensureRunning, loadBuffer, startMetronome, stopMetronome, preloadAll, playNow, playCorrection } from "@/lib/audio/engine";
 import { COUNT_CUES } from "@/lib/audio/cues";
-
-const INSTRUCTIONS: Record<Phase, { step: string; title: string; hint: string }> = {
-  IDLE:          { step: "STEP 1", title: "Get ready",          hint: "Stand over the pillow · clasp hands · lock elbows" },
-  SETUP:         { step: "STEP 1", title: "Get ready",          hint: "Stand over the pillow · clasp hands · lock elbows" },
-  COMPRESS:      { step: "STEP 2", title: "Push hard & fast",   hint: "Follow the beat — let it rise fully between pushes" },
-  STALLED:       { step: "KEEP GOING", title: "Don't stop!",    hint: "Keep pushing — hard and fast" },
-  BREATH_PROMPT: { step: "STEP 3", title: "Give 2 breaths",     hint: "Tilt the head back, lift the chin" },
-  BREATH_WINDOW: { step: "STEP 3", title: "Give 2 breaths",     hint: "Tilt the head back, lift the chin" },
-  CHECK_RISE:    { step: "STEP 3", title: "Watch the chest",    hint: "Then straight back on the chest" },
-};
 
 // Long side of frames sent to worker, aspect PRESERVED. Rehabify (reference)
 // feeds full-res video — MediaPipe crops landmark ROIs from the input frame,
@@ -57,27 +49,21 @@ export default function CoachPage() {
   const rafRef     = useRef<number>(0);
 
   const [feedback, setFeedback] = useState<CameraFeedback>(null);
-  const [score, setScore]       = useState<number | null>(null);
   const [count, setCount]       = useState(0);
-  const [bpm, setBpm]           = useState<number | null>(null);
   const [phase, setPhase]       = useState<Phase>("IDLE");
   const [metroOn, setMetroOn]   = useState(false);
-  const [beatCount, setBeatCount] = useState(0); // 1..30, manual metronome
   const [rounds, setRounds]     = useState(0);
   const [elapsed, setElapsed]   = useState(0); // seconds since first compression
   const sessionStartRef         = useRef<number | null>(null); // ms timestamp of first peak
 
+  // Pre-start setup overlay
+  const [setupDone, setSetupDone]   = useState(false);
+  const [setupStep, setSetupStep]   = useState(0);  // 0=hands, 1=shoulders, 2=arms
+  const [victimAge, setVictimAge]   = useState<"adult" | "child" | "infant">("adult");
+  const setupStartedRef             = useRef(false);
+  const setupTimersRef              = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  // Manual metronome: beat callback drives the count display; cleanup stops audio
-  useEffect(() => {
-    setOnBeat(b => {
-      setBeatCount((b % 30) + 1);
-    });
-    return () => {
-      setOnBeat(null);
-      stopMetronome();
-    };
-  }, []);
+  useEffect(() => stopMetronome, []);
 
   // Voice: decode all cues up front; unlock audio on the first tap anywhere (iOS)
   useEffect(() => {
@@ -86,6 +72,33 @@ export default function CoachPage() {
     window.addEventListener("pointerdown", unlock, { once: true });
     return () => window.removeEventListener("pointerdown", unlock);
   }, []);
+
+  // Read victim age from URL once on mount
+  useEffect(() => {
+    const a = new URLSearchParams(window.location.search).get("age");
+    if (a === "child" || a === "infant") setVictimAge(a);
+  }, []);
+
+  // Setup sequence: fires once when camera becomes ready
+  useEffect(() => {
+    if (status !== "ready" || setupStartedRef.current) return;
+    setupStartedRef.current = true;
+
+    setSetupStep(0);
+    playNow("moveHandsCentre");
+
+    const t1 = setTimeout(() => { setSetupStep(1); playNow("shouldersOver"); }, 3200);
+    const t2 = setTimeout(() => { setSetupStep(2); playNow("straightenArms"); }, 6000);
+    const t3 = setTimeout(() => { setSetupDone(true); }, 9000);
+    setupTimersRef.current = [t1, t2, t3];
+    return () => setupTimersRef.current.forEach(clearTimeout);
+  }, [status]); // eslint-disable-line
+
+  function finishSetup() {
+    setupTimersRef.current.forEach(clearTimeout);
+    setSetupDone(true);
+    ensureRunning().then(() => { startMetronome(); setMetroOn(true); });
+  }
 
   async function toggleMetronome() {
     if (metroOn) {
@@ -189,7 +202,6 @@ export default function CoachPage() {
       navigator.vibrate?.(40);
       playNow(COUNT_CUES[(next.compressCount - 1) % 30]); // spoken count on the peak
       setCount(next.compressCount);
-      setBpm(currentBpm(detectRef.current));
       if (next.cycleCount !== prev.cycleCount) setRounds(next.cycleCount);
     }
     if (next.phase !== prev.phase) setPhase(next.phase);
@@ -254,12 +266,14 @@ export default function CoachPage() {
           // 3D pose angle (shoulder→elbow→wrist): z removes the foreshortening
           // that made straight arms read ~150° in 2D when leaning at the camera
           let bent = bentRef.current[key];
-          if (el && wr) {
+          if (el && wr && (el.visibility ?? 1) >= ELBOW_VIS_MIN) {
             const raw = angleBetween3D(sh, el, wr);
-            const sm = armAngleRef.current[key] * 0.7 + raw * 0.3;
+            // Heavy smoothing (0.88) — CPR is fast but angle flicker is worse than lag
+            const sm = armAngleRef.current[key] * 0.88 + raw * 0.12;
             armAngleRef.current[key] = sm;
             bent = bent ? sm < BEND_CLEAR_DEG : sm < BEND_TRIP_DEG;
           }
+          // Low-visibility elbow: hold previous bent state rather than falsely going red
           bentNow[key] = bent;
           const color = bent ? "#ef4444" : "#4ade80";
 
@@ -423,6 +437,15 @@ export default function CoachPage() {
             style={facing === "user" ? { transform: "scaleX(-1)" } : undefined}
           />
 
+          {/* Y-trace plot — top left, tuning aid for peak detection */}
+          <canvas
+            ref={traceRef}
+            width={240}
+            height={64}
+            className="absolute top-3 left-3 z-10 rounded-lg"
+            style={{ background: "rgba(0,0,0,0.6)" }}
+          />
+
           {/* Flip — top right */}
           <button
             onClick={flip}
@@ -455,17 +478,93 @@ export default function CoachPage() {
             </div>
           )}
 
+          {/* Pre-start setup overlay — camera visible behind, voice guides position */}
+          {!setupDone && status === "ready" && (
+            <div className="absolute inset-0 z-20 flex flex-col justify-end">
+              {/* Dim backdrop — user still sees themselves */}
+              <div className="absolute inset-0 bg-black/40" />
+
+              {/* Instruction card */}
+              <div
+                className="relative rounded-t-3xl px-6 pt-5 pb-safe"
+                style={{
+                  background: "#F0EEE9",
+                  paddingBottom: "max(2rem, env(safe-area-inset-bottom))",
+                  boxShadow: "0 -4px 32px rgba(0,0,0,0.12)",
+                }}
+              >
+                {/* Step progress bar */}
+                <div className="flex gap-2 mb-5">
+                  {[0, 1, 2].map(i => (
+                    <div
+                      key={i}
+                      className="h-1 flex-1 rounded-full"
+                      style={{
+                        background: i <= setupStep ? "#E86B47" : "#e4e2dc",
+                        transition: "background 300ms ease",
+                      }}
+                    />
+                  ))}
+                </div>
+
+                {/* Step content */}
+                <div style={{ minHeight: 96 }}>
+                  {setupStep === 0 && (
+                    <>
+                      <p className="text-[11px] font-bold tracking-widest text-[#E86B47] uppercase mb-1">Step 1 of 3 — Hand placement</p>
+                      <p className="text-2xl font-black text-zinc-900 leading-tight">Place your hands</p>
+                      <p className="text-sm text-zinc-500 mt-1 leading-snug">
+                        {victimAge === "adult"  && "Both hands interlocked · center of chest, between the nipples"}
+                        {victimAge === "child"  && "One hand · center of chest, between the nipples"}
+                        {victimAge === "infant" && "Two fingers · just below the nipple line, center of chest"}
+                      </p>
+                    </>
+                  )}
+                  {setupStep === 1 && (
+                    <>
+                      <p className="text-[11px] font-bold tracking-widest text-[#E86B47] uppercase mb-1">Step 2 of 3 — Body position</p>
+                      <p className="text-2xl font-black text-zinc-900 leading-tight">Shoulders over hands</p>
+                      <p className="text-sm text-zinc-500 mt-1 leading-snug">
+                        Position yourself directly above · let your body weight do the work — not just your arms
+                      </p>
+                    </>
+                  )}
+                  {setupStep === 2 && (
+                    <>
+                      <p className="text-[11px] font-bold tracking-widest text-[#E86B47] uppercase mb-1">Step 3 of 3 — Arms</p>
+                      <p className="text-2xl font-black text-zinc-900 leading-tight">Lock your elbows</p>
+                      <p className="text-sm text-zinc-500 mt-1 leading-snug">
+                        Straight arms, elbows locked · push down{" "}
+                        {victimAge === "infant" ? "1.5 inches" : "2 inches"} and let the chest fully recoil
+                      </p>
+                    </>
+                  )}
+                </div>
+
+                <button
+                  onClick={finishSetup}
+                  className="mt-5 w-full rounded-2xl bg-zinc-900 text-white text-lg font-black text-center"
+                  style={{
+                    minHeight: 72,
+                    transition: "transform 150ms cubic-bezier(0.23,1,0.32,1)",
+                  }}
+                  onPointerDown={e => (e.currentTarget.style.transform = "scale(0.97)")}
+                  onPointerUp={e => (e.currentTarget.style.transform = "")}
+                  onPointerLeave={e => (e.currentTarget.style.transform = "")}
+                >
+                  I&apos;m in position — start CPR
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Stats HUD — frosted pill overlaid on bottom of camera, all edges rounded */}
           {(() => {
             const PHASE_DOT: Record<Phase, string> = {
-              IDLE: "bg-zinc-400", SETUP: "bg-zinc-400",
-              COMPRESS: "bg-emerald-400", STALLED: "bg-amber-400",
-              BREATH_PROMPT: "bg-sky-400", BREATH_WINDOW: "bg-sky-400", CHECK_RISE: "bg-sky-400",
+              IDLE: "bg-zinc-400", COMPRESS: "bg-emerald-400", STALLED: "bg-amber-400",
             };
             const PHASE_LABEL: Record<Phase, string> = {
-              IDLE: "READY", SETUP: "READY",
-              COMPRESS: "PUSH", STALLED: "DON'T STOP",
-              BREATH_PROMPT: "BREATHE", BREATH_WINDOW: "BREATHE", CHECK_RISE: "WATCH",
+              IDLE: "READY", COMPRESS: "PUSH", STALLED: "DON'T STOP",
             };
             const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
             const ss = String(elapsed % 60).padStart(2, "0");

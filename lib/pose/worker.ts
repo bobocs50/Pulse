@@ -17,7 +17,7 @@ async function init() {
   landmarker = await PoseLandmarker.createFromOptions(vision, {
     baseOptions: { modelAssetPath: MODEL_URL },
     runningMode: "VIDEO",
-    numPoses: 2, // rescuer + patient on floor — pick more vertical pose below
+    numPoses: 1, // single rescuer — the patient on the floor isn't part of the frame
     minPoseDetectionConfidence: 0.5,
     minPosePresenceConfidence: 0.5,
     minTrackingConfidence: 0.5,
@@ -33,19 +33,6 @@ async function init() {
   });
   const msg: WorkerOutMessage = { type: "ready" };
   self.postMessage(msg);
-}
-
-// Pick the rescuer: compare average y-span of the two poses; larger span = more vertical = rescuer
-function selectRescuer(allLandmarks: Landmark[][]): Landmark[] | null {
-  if (!allLandmarks.length) return null;
-  if (allLandmarks.length === 1) return allLandmarks[0];
-  const span = (lm: Landmark[]) => {
-    const ys = lm.map(l => l.y);
-    return Math.max(...ys) - Math.min(...ys);
-  };
-  return allLandmarks[0] && allLandmarks[1]
-    ? span(allLandmarks[0]) >= span(allLandmarks[1]) ? allLandmarks[0] : allLandmarks[1]
-    : allLandmarks[0] ?? null;
 }
 
 self.onmessage = async (e: MessageEvent<WorkerInMessage>) => {
@@ -70,7 +57,7 @@ self.onmessage = async (e: MessageEvent<WorkerInMessage>) => {
     let hands: Landmark[][] | null = null;
     try {
       const result = landmarker.detectForVideo(bitmap, ts);
-      landmarks = selectRescuer(result.landmarks as Landmark[][]);
+      landmarks = (result.landmarks[0] as Landmark[] | undefined) ?? null;
     } catch {
       // skip bad frame
     }

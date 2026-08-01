@@ -3,7 +3,9 @@
 import { OneEuroFilter } from "1eurofilter";
 import type { Landmark } from "@/types/vision";
 
-const CFG = { freq: 30, mincutoff: 1.0, beta: 0.02, dcutoff: 1.0 };
+// beta raised from 0.02 (Rehabify rehab speed) to 0.07 — CPR is ~2Hz,
+// needs higher velocity damping to avoid lag on the fast down-stroke.
+const CFG = { freq: 30, mincutoff: 1.0, beta: 0.07, dcutoff: 1.0 };
 
 export interface FilterState {
   filters: OneEuroFilter[][];

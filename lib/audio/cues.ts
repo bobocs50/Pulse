@@ -1,9 +1,8 @@
-// All pre-rendered ElevenLabs v3 audio cues.
-// Files go in public/audio/. Render tonight before the hackathon.
-// Slot duration at 110 BPM: 60000/110 ≈ 545ms — clip numbers tight to fit.
+// Pre-rendered voice cues. Files live in public/audio/.
+// Slot at 110 BPM: 60000/110 ≈ 545ms — clip counts tight to fit.
 
 export const CUE: Record<string, string> = {
-  // Count 1–30
+  // Count 1–30 (played on detected peak)
   one:    "/audio/one.mp3",
   two:    "/audio/two.mp3",
   three:  "/audio/three.mp3",
@@ -24,8 +23,8 @@ export const CUE: Record<string, string> = {
   eighteen: "/audio/eighteen.mp3",
   nineteen: "/audio/nineteen.mp3",
   twenty:   "/audio/twenty.mp3",
-  "twenty-one": "/audio/twenty-one.mp3",
-  "twenty-two": "/audio/twenty-two.mp3",
+  "twenty-one":  "/audio/twenty-one.mp3",
+  "twenty-two":  "/audio/twenty-two.mp3",
   "twenty-three":"/audio/twenty-three.mp3",
   "twenty-four": "/audio/twenty-four.mp3",
   "twenty-five": "/audio/twenty-five.mp3",
@@ -35,34 +34,17 @@ export const CUE: Record<string, string> = {
   "twenty-nine": "/audio/twenty-nine.mp3",
   thirty:        "/audio/thirty.mp3",
 
-  // Metronome
+  // Metronome tick
   click: "/audio/click.mp3",
 
-  // Phase
-  stopCompressions:  "/audio/stop-compressions.mp3",
-  tiltAndPinch:      "/audio/tilt-and-pinch.mp3",
-  twoBreaths:        "/audio/two-breaths.mp3",
-  watchForRise:      "/audio/watch-for-rise.mp3",
-  resumeCompressions:"/audio/resume-compressions.mp3",
-  swapIfYouCan:      "/audio/swap-if-you-can.mp3",
+  // Setup sequence (fires once when camera becomes ready)
+  moveHandsCentre: "/audio/move-hands-centre.mp3",
+  shouldersOver:   "/audio/shoulders-over.mp3",
 
-  // Corrections (imperative, 2–5 words, name corrective action only)
+  // Form corrections (imperative, 2–5 words)
   straightenArms:    "/audio/straighten-arms.mp3",
   straightenLeftArm: "/audio/straighten-left-arm.mp3",
   straightenRightArm:"/audio/straighten-right-arm.mp3",
-  shouldersOver:     "/audio/shoulders-over.mp3",
-  pushHarder:        "/audio/push-harder.mp3",
-  letItRise:         "/audio/let-it-rise.mp3",
-  slowDown:          "/audio/slow-down.mp3",
-  aLittleFaster:     "/audio/a-little-faster.mp3",
-  moveHandsCentre:   "/audio/move-hands-centre.mp3",
-
-  // State
-  keepGoing:         "/audio/keep-going.mp3",
-  goodKeepThatPace:  "/audio/good-keep-that-pace.mp3",
-
-  // Camera / out-of-frame
-  cantSeeYou:        "/audio/cant-see-you.mp3",
 };
 
 export const COUNT_CUES = [
