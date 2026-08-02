@@ -1,7 +1,7 @@
-// Session state machine. 20:2 cycle (shortened from the clinical 30:2 for demo pacing):
-//   IDLE → COMPRESS (on first PEAK) → BREATHS (at compression 20) → DONE
+// Session state machine. 30:2 cycle:
+//   IDLE → COMPRESS (on first PEAK) → BREATHS (at compression 30) → DONE
 //                 ↕ STALLED (no compression for 1.5s)
-// DONE is terminal — real CPR loops 20:2 until help arrives, but the demo stops after
+// DONE is terminal — real CPR loops 30:2 until help arrives, but the demo stops after
 // one round so it ends on the breath instructions instead of counting forever.
 // Pre-CPR setup is handled by the coach page's UI state, not this machine.
 
@@ -39,8 +39,8 @@ export function transition(
     // The only ways out are the timer below and the tap (which backdates breathStartedAt).
     if (elapsed > BREATH_MS) {
       return {
-        phase: "DONE",
-        compressCount: 20,
+        phase: "COMPRESS",
+        compressCount: 0,
         cycleCount: state.cycleCount,
         lastCompressAt: nowMs,
         breathStartedAt: 0,
@@ -51,10 +51,10 @@ export function transition(
 
   if (event === "PEAK") {
     const count = state.compressCount + 1;
-    if (count >= 20) {
+    if (count >= 30) {
       return {
         phase: "BREATHS",
-        compressCount: 20,
+        compressCount: 30,
         cycleCount: state.cycleCount + 1,
         lastCompressAt: nowMs,
         breathStartedAt: nowMs,
