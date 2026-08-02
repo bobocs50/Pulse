@@ -1,10 +1,10 @@
 <div align="center">
 
-# CPR Coach | 🏆 Winner — Mobile Hack Berlin 2026
+# Pulse | 🏆 Winner — Mobile Hack Berlin 2026
 
-**A phone-camera CPR coach that watches you and coaches you out loud.**
+**When someone collapses, you have minutes. Pulse is the phone-camera CPR coach for that moment.**
 
-Prop the phone up. Start compressions. A metronome ticks at 110 BPM, a voice counts every fifth stroke, and the moment your elbows bend it tells you to straighten your arms — all from a single rear camera, running fully on-device.
+You find someone unresponsive. You pull out your phone, open Pulse, prop it up, and start compressions. A metronome ticks at 110 BPM, a voice counts every fifth stroke, and the moment your elbows bend it tells you to straighten your arms — all from a single rear camera, running fully on-device. No login, no signal required after the first load.
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black) ![React](https://img.shields.io/badge/React-19-61dafb) ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6) ![MediaPipe](https://img.shields.io/badge/MediaPipe-Tasks_Vision-4285F4) ![Web Audio](https://img.shields.io/badge/Web_Audio-scheduler-orange) ![ElevenLabs](https://img.shields.io/badge/ElevenLabs-v3-purple) ![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8) ![Tailwind](https://img.shields.io/badge/Tailwind-4-38bdf8)
 
@@ -13,7 +13,7 @@ Prop the phone up. Start compressions. A metronome ticks at 110 BPM, a voice cou
 ## Demo
 
 <p align="center">
-  <img src="docs/cpr-animation.gif" alt="Pulse CPR coach demo" width="520" />
+  <img src="docs/cpr-animation.gif" alt="Pulse emergency CPR demo" width="520" />
 </p>
 
 ### The Clara triage flow
@@ -39,7 +39,7 @@ Prop the phone up. Start compressions. A metronome ticks at 110 BPM, a voice cou
 
 ## What it does
 
-A bystander opens the PWA from their home screen, taps **Start**, and gets talked through the pre-CPR checks by Clara — an ElevenLabs voice agent that ticks off responsive / breathing / age / AED / position via client tools. When the user says they're in position, Clara hands off and releases the mic.
+In an emergency, a bystander opens Pulse from the home screen, taps **Start**, and gets talked through the pre-CPR checks by Clara — an ElevenLabs voice agent that ticks off responsive / breathing / age / AED / position via client tools. When the user says they're in position, Clara hands off and releases the mic.
 
 The camera goes full-bleed with a live skeleton overlay. A short setup waits until the pose model can actually see shoulders and hands, counts 3-2-1, and the metronome starts. From there:
 
