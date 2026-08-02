@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/cpr-animation.gif" alt="Pulse CPR coach demo" width="480" />
+
 # CPR Coach | 🏆 Winner — Mobile Hack Berlin 2026
 
 **A phone-camera CPR coach that watches you and coaches you out loud.**
@@ -7,10 +9,6 @@
 Prop the phone up. Start compressions. A metronome ticks at 110 BPM, a voice counts every fifth stroke, and the moment your elbows bend it tells you to straighten your arms — all from a single rear camera, running fully on-device.
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black) ![React](https://img.shields.io/badge/React-19-61dafb) ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6) ![MediaPipe](https://img.shields.io/badge/MediaPipe-Tasks_Vision-4285F4) ![Web Audio](https://img.shields.io/badge/Web_Audio-scheduler-orange) ![ElevenLabs](https://img.shields.io/badge/ElevenLabs-v3-purple) ![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8) ![Tailwind](https://img.shields.io/badge/Tailwind-4-38bdf8)
-
-<br />
-
-<img src="docs/cpr-animation.gif" alt="Pulse CPR coach demo" width="480" />
 
 </div>
 
